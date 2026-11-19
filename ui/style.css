@@ -20,8 +20,9 @@
   --accent: #6c9cf5; --accent-soft: #1f2d48; --line-strong: #3d4757; --sel: #243354; --danger: #f07b7b; --warn-bg: #3a3218; --warn-line: #8a7224; color-scheme: dark }
 
 *, *::before, *::after { box-sizing: border-box; }
+html { font-size: 15px; }
 html, body { height: 100%; margin: 0; }
-body { background: var(--panel); color: var(--fg); font-family: var(--font); font-size: calc(15px * var(--scale)); overflow: hidden; }
+body { background: var(--panel); color: var(--fg); font-family: var(--font); font-size: calc(1rem * var(--scale)); overflow: hidden; --side-w: 15rem; --list-w: 30rem; }
 button { font: inherit; color: inherit; }
 button:focus-visible, input:focus-visible, .mail:focus-visible, .folder:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 [hidden] { display: none !important; }
@@ -41,22 +42,24 @@ button:focus-visible, input:focus-visible, .mail:focus-visible, .folder:focus-vi
 
 /* ---------- Hauptfenster ---------- */
 .app { display: flex; flex-direction: column; height: 100%; }
-.body { display: grid; grid-template-columns: 15em minmax(0, 1fr); flex: 1; min-height: 0; }
+.body { display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr); flex: 1; min-height: 0; }
 
 /* Zeile 1: Programmleiste */
-.topbar { display: flex; flex-wrap: wrap; align-items: center; gap: .5em 1.6em; padding: .55em 1.2em; font-size: .85em;
+.topbar { display: flex; flex-wrap: nowrap; align-items: center; gap: 1.4rem; padding: .45rem 1rem; font-size: 13px; white-space: nowrap; overflow: hidden;
   background: var(--panel-2); border-bottom: 1px solid var(--line); color: var(--muted); }
 .tb-group { display: inline-flex; align-items: center; gap: .5em; }
 .tb-label { font-weight: 600; color: var(--fg); }
-.tb-note { font-size: .95em; }
+.tb-note { font-size: .95em; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.testmode { min-width: 0; flex-shrink: 1; }
+.tb-group { flex-shrink: 0; }
 .testmode.on { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: .5em; padding: .2em .3em .2em .7em; }
 .testmode.on .tb-note { color: var(--fg); }
 #tm-off[data-confirm] { color: var(--danger); font-weight: 600; }
 .a-small { font-size: .8em; } .a-big { font-size: 1.25em; }
-#sz { width: 8em; }
-.tb-btn { margin-left: auto; border: 1px solid var(--line); background: var(--panel); border-radius: .4em; padding: .3em .8em; cursor: pointer; }
+#sz { width: 7rem; }
+.tb-btn { margin-left: auto; flex-shrink: 0; border: 1px solid var(--line); background: var(--panel); border-radius: .4em; padding: .3em .8em; cursor: pointer; }
 
-.side { background: var(--panel-2); border-right: 1px solid var(--line); padding: 1em .75em; display: flex; flex-direction: column; gap: .2em; min-height: 0; }
+.side { position: relative; background: var(--panel-2); border-right: 1px solid var(--line); padding: 1em .75em; display: flex; flex-direction: column; gap: .2em; min-height: 0; }
 .new { font-weight: 600; background: var(--accent); color: #fff; border: 0; border-radius: .6em; padding: .7em 1em; margin-bottom: .9em; cursor: pointer; text-align: left; }
 .folders { display: flex; flex-direction: column; gap: .15em; overflow-y: auto; flex: 1; min-height: 0; }
 .side h2 { font-size: .72em; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); margin: 1.1em .6em .4em; font-weight: 600; }
@@ -74,9 +77,15 @@ button:focus-visible, input:focus-visible, .mail:focus-visible, .folder:focus-vi
 .seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--fg); font-weight: 600; }
 
 .main { display: grid; min-width: 0; min-height: 0; grid-template-columns: minmax(0, 1fr); }
-.main.open { grid-template-columns: minmax(0, 30em) minmax(0, 1fr); }
+.main.open { grid-template-columns: minmax(0, min(var(--list-w), calc(100% - 28rem))) minmax(0, 1fr); }
 
-.list { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.list { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+/* Ziehgriffe zum Verbreitern von Ordnerleiste und Lesebereich */
+.split { position: absolute; top: 0; bottom: 0; right: -4px; width: 8px; cursor: col-resize; z-index: 4; touch-action: none; }
+.split:hover, .split.drag { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+.main:not(.open) #split-read { display: none; }
+body.dragging { cursor: col-resize; user-select: none; }
+body.dragging iframe { pointer-events: none; }
 .main.open .list { border-right: 1px solid var(--line); }
 /* Zeile 2: Ordnerkopf, klar abgesetzt von der scrollbaren Liste */
 .listhead { padding: .9em 1.2em 1em; display: flex; flex-direction: column; align-items: flex-start; gap: .45em; }
@@ -121,10 +130,10 @@ button:focus-visible, input:focus-visible, .mail:focus-visible, .folder:focus-vi
 
 /* Breite Übersicht ohne Lesebereich: Spalten Von/An | Ordner | Betreff | Datum */
 @media (min-width: 1000px) {
-  .main:not(.open) .cols { display: grid; grid-template-columns: 16em 10em minmax(0, 1fr) 9em; gap: .3em .8em; padding: .55em 1.2em .55em 1.9em; background: var(--panel-2); }
+  .main:not(.open) .cols { display: grid; grid-template-columns: 16rem 10rem minmax(0, 1fr) 9rem; gap: .3em .8em; padding: .55em 1.2em .55em 1.9em; background: var(--panel-2); }
   .main:not(.open) .cols span { font-size: .75em; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
   .main:not(.open) .cols .c-date { text-align: right; }
-  .main:not(.open) .mail { grid-template-columns: 16em 10em minmax(0, 1fr) 9em; grid-template-areas: "who fold subj date"; padding-block: .85em; }
+  .main:not(.open) .mail { grid-template-columns: 16rem 10rem minmax(0, 1fr) 9rem; grid-template-areas: "who fold subj date"; padding-block: .85em; }
   .main:not(.open) .mail .fold { display: block; }
   .main:not(.open) .mail .subj .tag { display: none; }
   .main:not(.open) .mail.unread::after { top: 50%; transform: translateY(-50%); }
@@ -155,7 +164,7 @@ button:focus-visible, input:focus-visible, .mail:focus-visible, .folder:focus-vi
 
 /* Schmal (z.B. Surface): schmale Ordnerleiste, geöffnete Mail ersetzt die Liste */
 @media (max-width: 1000px) {
-  .body { grid-template-columns: 4.2em minmax(0, 1fr); }
+  .body { grid-template-columns: 4.2rem minmax(0, 1fr); }
   .side { padding: 1em .45em; align-items: center; }
   .side h2, .folder .lbl, .new .lbl { display: none; }
   .new { padding: .7em; text-align: center; width: 2.6em; }
@@ -166,6 +175,8 @@ button:focus-visible, input:focus-visible, .mail:focus-visible, .folder:focus-vi
   .folder .n { position: absolute; top: 0; right: 0; font-size: .65em; }
   .main.open { grid-template-columns: minmax(0, 1fr); }
   .main.open .list { display: none; }
+  .split { display: none; }
+  .topbar .tb-note { display: none; }
 }
 @media (max-width: 560px) {
   .body { grid-template-columns: minmax(0, 1fr); }

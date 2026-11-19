@@ -18,7 +18,9 @@ Ein- und Ausschalten oben in der Programmleiste („Testmodus: Einschalten / Aus
 - **Rücktaste** oder **Esc** schließt den Lesebereich
 - Gelesen/ungelesen per Knopf in der Zeile
 - Suche in **diesem Ordner** oder in **allen Ordnern**
-- Hell, Dunkel oder wie das System; Schriftgröße per Regler
+- Hell, Dunkel oder wie das System; Schriftgröße per Regler (nur die Schrift wächst, die Aufteilung bleibt)
+- Ordnerleiste und Lesebereich mit der Maus breiter oder schmaler ziehen (Doppelklick auf den Rand setzt zurück)
+- Mails passen sich immer der Breite des Lesebereichs an, ohne seitliches Scrollen
 - Passt sich an große Monitore und kleine Bildschirme an
 - Mails werden geschützt angezeigt: keine Skripte, keine nachgeladenen Bilder aus dem Netz
 

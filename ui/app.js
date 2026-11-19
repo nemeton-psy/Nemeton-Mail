@@ -65,12 +65,55 @@ function applySize(v) {
   document.documentElement.style.setProperty("--scale", v);
   $("sz").value = v;
   store("scale", v);
+  fitMail();
 }
+
+/* ---------- Breite von Ordnerleiste und Lesebereich ---------- */
+function applyWidths() {
+  const side = Number(load("sideW")) || 0, list = Number(load("listW")) || 0;
+  if (side) document.body.style.setProperty("--side-w", side + "px");
+  if (list) document.body.style.setProperty("--list-w", list + "px");
+}
+function dragSplit(handle, onMove, onEnd) {
+  handle.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    handle.classList.add("drag");
+    document.body.classList.add("dragging");
+    const move = (ev) => onMove(ev.clientX);
+    const up = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.classList.remove("drag");
+      document.body.classList.remove("dragging");
+      onEnd();
+      fitMail();
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up, { once: true });
+    handle.addEventListener("pointercancel", up, { once: true });
+  });
+}
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+let sideW = 0, listW = 0;
+dragSplit($("split-side"), (x) => {
+  const left = document.querySelector(".body").getBoundingClientRect().left;
+  sideW = Math.round(clamp(x - left, 150, 480));
+  document.body.style.setProperty("--side-w", sideW + "px");
+}, () => sideW && store("sideW", sideW));
+dragSplit($("split-read"), (x) => {
+  const r = $("main").getBoundingClientRect();
+  listW = Math.round(clamp(x - r.left, 260, r.width - 420));
+  document.body.style.setProperty("--list-w", listW + "px");
+  fitMail();
+}, () => listW && store("listW", listW));
+$("split-side").ondblclick = () => { document.body.style.removeProperty("--side-w"); store("sideW", ""); };
+$("split-read").ondblclick = () => { document.body.style.removeProperty("--list-w"); store("listW", ""); fitMail(); };
 
 /* ---------- Start ---------- */
 async function start() {
   applyTheme(load("theme") || "auto");
   applySize(load("scale") || "1");
+  applyWidths();
   const acc = await invoke("get_account");
   if (!acc) return showSetup();
   setTestMode(acc.test_mode !== false);
@@ -293,8 +336,11 @@ function setTestMode(on) {
   $("tm-off").textContent = "Ausschalten";
   delete $("tm-off").dataset.confirm;
   $("tm-note").textContent = on
-    ? "An. Auf dem Server wird nichts geändert, Löschen und Markieren passieren nur in der App."
-    : "Aus. Löschen und Markieren werden auf dem Server ausgeführt.";
+    ? "An – Server bleibt unverändert"
+    : "Aus – Änderungen gehen an den Server";
+  $("tm-group").title = on
+    ? "Testmodus an: Auf dem Server wird nichts geändert. Löschen und Gelesen-Markieren passieren nur in der App."
+    : "Testmodus aus: Löschen und Markieren werden auf dem Server ausgeführt.";
   if (!on) { S.hidden.clear(); S.localSeen.clear(); }
 }
 $("tm-off").onclick = async () => {
@@ -363,7 +409,7 @@ function showMessage(msg) {
       <div class="meta"><div class="av"></div><div style="min-width:0"><b></b><span class="to"></span></div></div>
       <div class="atts"></div>
     </div>
-    <div class="read-body"><iframe sandbox title="Inhalt der Nachricht"></iframe></div>`;
+    <div class="read-body"><iframe sandbox="allow-same-origin" title="Inhalt der Nachricht"></iframe></div>`;
   r.querySelector("h4").textContent = msg.subject || "(kein Betreff)";
   r.querySelector(".av").textContent = (msg.from || msg.from_addr || "?").trim()[0]?.toUpperCase() || "?";
   r.querySelector(".meta b").textContent = msg.from_addr && msg.from !== msg.from_addr ? `${msg.from} <${msg.from_addr}>` : msg.from;
@@ -372,13 +418,43 @@ function showMessage(msg) {
   for (const a of msg.attachments) { const s = document.createElement("span"); s.textContent = "📎 " + a; atts.appendChild(s); }
   // Inhalt in einem abgeschotteten Rahmen: keine Skripte, keine Bilder aus dem Netz.
   const base = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:">
-    <style>body{font-family:${getComputedStyle(document.body).fontFamily};font-size:15px;line-height:1.6;color:#18202c;margin:1.4em 2em;word-wrap:break-word}img{max-width:100%;height:auto}pre{white-space:pre-wrap}</style>`;
+    <style>body{font-family:${getComputedStyle(document.body).fontFamily};font-size:15px;line-height:1.6;color:#18202c;margin:1.2em 1.6em;overflow-wrap:anywhere}
+    img,video{max-width:100%!important;height:auto!important}pre{white-space:pre-wrap}table{width:auto!important;max-width:100%!important}td,th{width:auto!important;overflow-wrap:anywhere}</style>`;
   r.querySelector("iframe").srcdoc = msg.html
     ? base + msg.html
     : base + `<pre>${esc(msg.text || "(kein Inhalt)")}</pre>`;
+  const frame = r.querySelector("iframe");
+  frame.addEventListener("load", () => {
+    // Feste Bildgrößen entfernen: Bilder aus dem Netz sind gesperrt und
+    // würden sonst als leere Kästen die Mail unnötig breit machen.
+    for (const img of frame.contentDocument?.querySelectorAll("img") ?? []) {
+      img.removeAttribute("width");
+      img.removeAttribute("height");
+    }
+    fitMail();
+  });
   $("r-close").onclick = closeMail;
   $("r-del").onclick = () => remove(key(msg));
 }
+
+// Mail immer auf die Breite des Lesebereichs einpassen: erst mit der
+// gewählten Schriftgröße vergrößern, und falls die Mail (z.B. ein Newsletter
+// mit fester Breite) dann breiter ist als der Platz, so weit verkleinern,
+// dass nichts seitlich gescrollt werden muss.
+function fitMail() {
+  const frame = document.querySelector("#read iframe");
+  const doc = frame?.contentDocument;
+  if (!doc?.body) return;
+  const scale = Number(getComputedStyle(document.documentElement).getPropertyValue("--scale")) || 1;
+  doc.documentElement.style.zoom = "1";
+  doc.body.style.zoom = String(scale);
+  const avail = doc.documentElement.clientWidth;
+  const need = doc.documentElement.scrollWidth;
+  if (need > avail + 1) {
+    doc.body.style.zoom = String(Math.max(0.3, scale * (avail / need)));
+  }
+}
+if (window.ResizeObserver) new ResizeObserver(() => fitMail()).observe($("read"));
 
 function closeMail() {
   S.opened = null;
