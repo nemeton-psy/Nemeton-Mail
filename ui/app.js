@@ -116,11 +116,29 @@ $("setup-form").addEventListener("submit", async (e) => {
 /* ---------- Ordner ---------- */
 async function loadFolders() {
   try {
-    S.folders = await invoke("list_folders");
+    S.folders = sortFolders(await invoke("list_folders"));
   } catch (err) {
     toast("Ordner konnten nicht geladen werden: " + err, true);
   }
   renderFolders();
+}
+
+// Systemordner (Posteingang, Entwürfe, …) bleiben oben in fester Reihenfolge.
+// Alle anderen: Sonderzeichen zuerst, dann Zahlen (0, 1, 2 … 10), dann A–Z.
+// Unterordner stehen direkt unter ihrem Oberordner.
+const collator = new Intl.Collator("de", { numeric: true, sensitivity: "base" });
+function sortFolders(list) {
+  const sys = list.filter((f) => f.role);
+  const rest = list.filter((f) => !f.role);
+  rest.sort((a, b) => {
+    const pa = a.path?.length ? a.path : [a.name], pb = b.path?.length ? b.path : [b.name];
+    for (let i = 0; i < Math.min(pa.length, pb.length); i++) {
+      const c = collator.compare(pa[i], pb[i]);
+      if (c) return c;
+    }
+    return pa.length - pb.length;
+  });
+  return [...sys, ...rest];
 }
 
 function renderFolders() {
@@ -210,17 +228,14 @@ function render() {
   const all = isAllSearch();
   $("ftitle").textContent = all ? "Suche in allen Ordnern" : folderName(S.folder);
   const f = S.folders.find((x) => x.id === S.folder);
-  $("sum").textContent = S.query ? "" : f ? `${f.unseen} ungelesen · ${S.list.length} Nachrichten` : "";
+  $("sum").textContent = S.query
+    ? (S.searching ? "Suche läuft …" : `${S.list.length} Treffer ${all ? "in allen Ordnern" : "in " + folderName(S.folder)}`)
+    : f ? `${f.unseen} ungelesen · ${f.total} Nachrichten` : "";
+  $("col-who").textContent = all ? "Von / An" : isSentFolder(S.folder) ? "An" : "Von";
 
   if (S.searching) {
     box.innerHTML = `<div class="empty">Suche läuft …</div>`;
   } else {
-    if (S.query) {
-      const h = document.createElement("div");
-      h.className = "hint";
-      h.textContent = `${S.list.length} Treffer ${all ? "in allen Ordnern" : "in " + folderName(S.folder)}`;
-      box.appendChild(h);
-    }
     if (!S.list.length) {
       const e = document.createElement("div");
       e.className = "empty";
@@ -233,13 +248,20 @@ function render() {
   box.querySelector(".mail.on")?.scrollIntoView({ block: "nearest" });
 }
 
+function isSentFolder(id) {
+  const r = S.folders.find((x) => x.id === id)?.role;
+  return r === "sent" || r === "drafts";
+}
+
 function row(m, showFolder) {
   const el = document.createElement("div");
   const k = key(m);
   el.className = "mail" + (m.seen ? "" : " unread") + (k === S.sel ? " on" : "");
-  el.innerHTML = `<span class="from"></span><span class="date"></span><span class="tools"><button class="rd" type="button"></button><button class="del" type="button">Löschen</button></span><span class="subj"></span>`;
-  el.querySelector(".from").textContent = m.from || m.from_addr || "(unbekannt)";
-  el.querySelector(".from").title = m.from_addr;
+  el.innerHTML = `<span class="from"></span><span class="fold"></span><span class="date"></span><span class="tools"><button class="rd" type="button"></button><button class="del" type="button">Löschen</button></span><span class="subj"></span>`;
+  const sent = isSentFolder(m.folder);
+  el.querySelector(".from").textContent = sent ? "An: " + (m.to || "(unbekannt)") : (m.from || m.from_addr || "(unbekannt)");
+  el.querySelector(".from").title = sent ? m.to : m.from_addr;
+  el.querySelector(".fold").textContent = folderName(m.folder);
   el.querySelector(".date").textContent = fmtDate(m.date);
   el.querySelector(".subj").textContent = m.subject || "(kein Betreff)";
   if (showFolder) {
@@ -265,17 +287,23 @@ function applyLocal(list) {
 }
 function setTestMode(on) {
   S.testMode = on;
-  $("testbar").hidden = !on;
-  $("btn-testmode-on").hidden = on;
-  $("btn-testmode-off").textContent = "Ausschalten";
-  delete $("btn-testmode-off").dataset.confirm;
+  $("tm-group").classList.toggle("on", on);
+  $("tm-on").setAttribute("aria-pressed", String(on));
+  $("tm-off").setAttribute("aria-pressed", String(!on));
+  $("tm-off").textContent = "Ausschalten";
+  delete $("tm-off").dataset.confirm;
+  $("tm-note").textContent = on
+    ? "An. Auf dem Server wird nichts geändert, Löschen und Markieren passieren nur in der App."
+    : "Aus. Löschen und Markieren werden auf dem Server ausgeführt.";
   if (!on) { S.hidden.clear(); S.localSeen.clear(); }
 }
-$("btn-testmode-off").onclick = async () => {
-  const b = $("btn-testmode-off");
+$("tm-off").onclick = async () => {
+  if (!S.testMode) return;
+  const b = $("tm-off");
   if (!b.dataset.confirm) {
     b.dataset.confirm = "1";
-    b.textContent = "Wirklich? Dann wird Löschen und Markieren auf dem Server ausgeführt. Klick zum Bestätigen";
+    b.textContent = "Wirklich ausschalten? Nochmal klicken";
+    setTimeout(() => { if (S.testMode) setTestMode(true); }, 6000);
     return;
   }
   await invoke("set_test_mode", { on: false });
@@ -283,7 +311,8 @@ $("btn-testmode-off").onclick = async () => {
   toast("Testmodus aus: Änderungen gehen jetzt an den Server.");
   reloadList();
 };
-$("btn-testmode-on").onclick = async () => {
+$("tm-on").onclick = async () => {
+  if (S.testMode) return;
   await invoke("set_test_mode", { on: true });
   setTestMode(true);
   toast("Testmodus an: Auf dem Server wird nichts geändert.");
@@ -416,9 +445,18 @@ $("t-auto").onclick = () => applyTheme("auto");
 $("t-dark").onclick = () => applyTheme("dark");
 $("t-light").onclick = () => applyTheme("light");
 $("sz").oninput = (e) => applySize(e.target.value);
-$("btn-display").onclick = (e) => { e.stopPropagation(); $("side-foot").classList.toggle("pop"); };
-document.addEventListener("click", (e) => { if (!e.target.closest("#side-foot")) $("side-foot").classList.remove("pop"); });
-$("btn-refresh").onclick = async () => { await loadFolders(); S.query ? runSearch() : reloadList(); };
+$("btn-refresh").onclick = async () => {
+  const b = $("btn-refresh");
+  if (b.classList.contains("busy")) return;
+  b.classList.add("busy"); b.textContent = "↻ Rufe ab …";
+  try {
+    await loadFolders();
+    await (S.query ? runSearch() : reloadList());
+    toast("Mails abgerufen.");
+  } finally {
+    b.classList.remove("busy"); b.textContent = "↻ Abrufen";
+  }
+};
 $("btn-new").onclick = () => toast("Mails schreiben kommt im nächsten Schritt.");
 $("btn-logout").onclick = async () => {
   await invoke("logout");

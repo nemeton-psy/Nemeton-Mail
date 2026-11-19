@@ -25,6 +25,8 @@ pub struct Folder {
     pub role: String,
     /// Verschachtelungstiefe für Unterordner.
     pub depth: usize,
+    /// Lesbarer Pfad (Oberordner …, Ordner) zum Sortieren.
+    pub path: Vec<String>,
     pub unseen: u32,
     pub total: u32,
 }
@@ -35,6 +37,8 @@ pub struct Summary {
     pub folder: String,
     pub from: String,
     pub from_addr: String,
+    /// Empfänger (für Gesendet/Entwürfe), z.B. „Max Muster +2“.
+    pub to: String,
     pub subject: String,
     /// Sekunden seit 1970 (für die Anzeige in der Oberfläche).
     pub date: i64,
@@ -117,7 +121,8 @@ impl MailClient {
                 "archive" => "Archiv".to_string(),
                 _ => decode_utf7(leaf),
             };
-            out.push(Folder { id, name, role, depth, unseen: 0, total: 0 });
+            let path = id.split(delim).map(decode_utf7).collect();
+            out.push(Folder { id, name, role, depth, path, unseen: 0, total: 0 });
         }
         drop(names);
         // Anzahl ungelesener Mails je Ordner abfragen.
@@ -143,6 +148,8 @@ impl MailClient {
     }
 
     pub fn list_messages(&mut self, folder: &str, limit: usize) -> Result<Vec<Summary>, String> {
+        // Ordner jedes Mal neu öffnen, damit neue Mails sicher erscheinen.
+        self.selected = None;
         self.select(folder)?;
         let mut uids: Vec<u32> = self.session.uid_search("ALL").map_err(err)?.into_iter().collect();
         uids.sort_unstable();
@@ -175,6 +182,7 @@ impl MailClient {
                 folder: folder.to_string(),
                 from,
                 from_addr,
+                to: parse_to(headers.get_first_value("To").as_deref().unwrap_or("")),
                 subject: headers.get_first_value("Subject").unwrap_or_default(),
                 date,
                 seen: f.flags().iter().any(|x| matches!(x, Flag::Seen)),
@@ -328,6 +336,24 @@ fn parse_from(raw: &str) -> (String, String) {
     (raw.to_string(), String::new())
 }
 
+fn parse_to(raw: &str) -> String {
+    let Ok(list) = mailparse::addrparse(raw) else { return raw.to_string() };
+    let mut names = Vec::new();
+    for a in list.iter() {
+        match a {
+            mailparse::MailAddr::Single(s) => names.push(
+                s.display_name.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| s.addr.clone()),
+            ),
+            mailparse::MailAddr::Group(g) => names.push(g.group_name.clone()),
+        }
+    }
+    match names.len() {
+        0 => String::new(),
+        1 => names.remove(0),
+        n => format!("{} +{}", names[0], n - 1),
+    }
+}
+
 fn collect_parts(p: &ParsedMail, msg: &mut FullMessage) {
     if !p.subparts.is_empty() {
         for s in &p.subparts {
@@ -401,6 +427,12 @@ mod tests {
         assert_eq!(decode_utf7("Entw&APw-rfe"), "Entwürfe");
         assert_eq!(decode_utf7("A&-B"), "A&B");
         assert_eq!(decode_utf7("Plain"), "Plain");
+    }
+
+    #[test]
+    fn to_parsing() {
+        assert_eq!(parse_to("a@example.org"), "a@example.org");
+        assert_eq!(parse_to("\"Anna\" <a@x.org>, b@x.org, c@x.org"), "Anna +2");
     }
 
     #[test]

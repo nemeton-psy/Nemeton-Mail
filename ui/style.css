@@ -2,9 +2,10 @@
    Aufbau: Ordnerleiste | Mailliste | (optional) Lesebereich rechts.
    Alle Größen in em, damit der Schriftgrößen-Regler alles mitskaliert. */
 :root {
+  --warn-bg: #fbf0cf; --warn-line: #e6c55a;
   --bg: #eef1f5; --panel: #ffffff; --panel-2: #f6f8fb; --line: #dfe4ec;
   --fg: #18202c; --muted: #6a7586; --faint: #9aa4b3;
-  --accent: #2f6fdf; --accent-soft: #e3ecfc; --sel: #dbe6fb; --danger: #c93a3a;
+  --accent: #2f6fdf; --accent-soft: #e3ecfc; --line-strong: #c3ccd9; --sel: #dbe6fb; --danger: #c93a3a;
   --font: "Inter", "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
   --scale: 1;
   color-scheme: light;
@@ -12,11 +13,11 @@
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
   --bg: #11151c; --panel: #171c25; --panel-2: #1c222d; --line: #2a3240;
   --fg: #eef2f7; --muted: #98a3b5; --faint: #677284;
-  --accent: #6c9cf5; --accent-soft: #1f2d48; --sel: #243354; --danger: #f07b7b; color-scheme: dark } }
+  --accent: #6c9cf5; --accent-soft: #1f2d48; --line-strong: #3d4757; --sel: #243354; --danger: #f07b7b; --warn-bg: #3a3218; --warn-line: #8a7224; color-scheme: dark } }
 :root[data-theme="dark"] {
   --bg: #11151c; --panel: #171c25; --panel-2: #1c222d; --line: #2a3240;
   --fg: #eef2f7; --muted: #98a3b5; --faint: #677284;
-  --accent: #6c9cf5; --accent-soft: #1f2d48; --sel: #243354; --danger: #f07b7b; color-scheme: dark }
+  --accent: #6c9cf5; --accent-soft: #1f2d48; --line-strong: #3d4757; --sel: #243354; --danger: #f07b7b; --warn-bg: #3a3218; --warn-line: #8a7224; color-scheme: dark }
 
 *, *::before, *::after { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
@@ -39,7 +40,21 @@ button:focus-visible, input:focus-visible, .mail:focus-visible, .folder:focus-vi
 .primary:disabled { opacity: .6; cursor: progress; }
 
 /* ---------- Hauptfenster ---------- */
-.app { display: grid; grid-template-columns: 15em minmax(0, 1fr); height: 100%; }
+.app { display: flex; flex-direction: column; height: 100%; }
+.body { display: grid; grid-template-columns: 15em minmax(0, 1fr); flex: 1; min-height: 0; }
+
+/* Zeile 1: Programmleiste */
+.topbar { display: flex; flex-wrap: wrap; align-items: center; gap: .5em 1.6em; padding: .55em 1.2em; font-size: .85em;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); color: var(--muted); }
+.tb-group { display: inline-flex; align-items: center; gap: .5em; }
+.tb-label { font-weight: 600; color: var(--fg); }
+.tb-note { font-size: .95em; }
+.testmode.on { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: .5em; padding: .2em .3em .2em .7em; }
+.testmode.on .tb-note { color: var(--fg); }
+#tm-off[data-confirm] { color: var(--danger); font-weight: 600; }
+.a-small { font-size: .8em; } .a-big { font-size: 1.25em; }
+#sz { width: 8em; }
+.tb-btn { margin-left: auto; border: 1px solid var(--line); background: var(--panel); border-radius: .4em; padding: .3em .8em; cursor: pointer; }
 
 .side { background: var(--panel-2); border-right: 1px solid var(--line); padding: 1em .75em; display: flex; flex-direction: column; gap: .2em; min-height: 0; }
 .new { font-weight: 600; background: var(--accent); color: #fff; border: 0; border-radius: .6em; padding: .7em 1em; margin-bottom: .9em; cursor: pointer; text-align: left; }
@@ -53,10 +68,6 @@ button:focus-visible, input:focus-visible, .mail:focus-visible, .folder:focus-vi
 .dotf { width: .55em; height: .55em; border-radius: 50%; background: var(--faint); flex: none; }
 .folder.on .dotf { background: var(--accent); }
 .folder .ini { display: none; }
-.side-foot { border-top: 1px solid var(--line); padding-top: .8em; display: flex; flex-direction: column; gap: .6em; font-size: .85em; color: var(--muted); }
-.size { display: flex; flex-direction: column; gap: .3em; }
-.display-btn { display: none; }
-.link { background: none; border: 0; color: var(--muted); text-align: left; padding: 0; cursor: pointer; text-decoration: underline; }
 
 .seg { display: inline-flex; background: var(--panel); border: 1px solid var(--line); border-radius: .5em; padding: 2px; font-size: .85em; }
 .seg button { border: 0; background: none; color: var(--muted); padding: .35em .7em; border-radius: .4em; cursor: pointer; }
@@ -67,16 +78,17 @@ button:focus-visible, input:focus-visible, .mail:focus-visible, .folder:focus-vi
 
 .list { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .main.open .list { border-right: 1px solid var(--line); }
-.testbar { display: flex; flex-wrap: wrap; align-items: center; gap: .4em 1em; padding: .6em 1.2em; font-size: .85em;
-  background: color-mix(in srgb, #e0a100 18%, var(--panel)); border-bottom: 1px solid color-mix(in srgb, #e0a100 45%, var(--line)); }
-.testbar span { flex: 1; min-width: 14em; }
-.testbar button { border: 1px solid var(--line); background: var(--panel); border-radius: .4em; padding: .25em .7em; cursor: pointer; font-size: .95em; }
-.listhead { padding: 1em 1.2em .8em; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: .7em 1em; align-items: center; }
-.listhead .t { display: flex; align-items: baseline; gap: .6em; margin-right: auto; min-width: 0; }
-.listhead h3 { margin: 0; font-size: 1.35em; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.listhead .c { color: var(--muted); font-size: .85em; white-space: nowrap; }
+/* Zeile 2: Ordnerkopf, klar abgesetzt von der scrollbaren Liste */
+.listhead { padding: .9em 1.2em 1em; display: flex; flex-direction: column; align-items: flex-start; gap: .45em; }
+.listhead h3 { margin: 0; font-size: 1.45em; font-weight: 700; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.counts { display: flex; align-items: center; gap: .8em; color: var(--muted); font-size: .85em; }
+.counts .icon { font-size: 1em; padding: .2em .7em; }
+.counts .icon.busy { opacity: .6; cursor: progress; }
+.list { border-top: 0; }
+.list > .mails { border-top: 3px solid var(--line-strong); box-shadow: inset 0 6px 6px -6px rgb(0 0 0 / .18); }
+.cols { display: none; }
 .icon { border: 1px solid var(--line); background: var(--panel); border-radius: .4em; cursor: pointer; padding: .1em .5em; color: var(--muted); }
-.find { display: flex; flex-wrap: wrap; gap: .5em; align-items: center; min-width: 0; }
+.find { display: flex; flex-wrap: wrap; gap: .5em; align-items: center; min-width: 0; margin-top: .35em; width: 100%; }
 .search { font: inherit; font-size: .9em; width: min(22em, 100%); padding: .55em .8em; border-radius: .5em; border: 1px solid var(--line); background: var(--panel-2); color: var(--fg); }
 .mails { overflow-y: auto; flex: 1; outline: none; }
 .hint, .empty { padding: .7em 1.2em; font-size: .9em; color: var(--muted); }
@@ -84,12 +96,15 @@ button:focus-visible, input:focus-visible, .mail:focus-visible, .folder:focus-vi
 .empty { padding: 2em 1.2em; }
 
 .mail { position: relative; padding: .95em 1.2em .95em 1.9em; border-bottom: 1px solid var(--line); user-select: none;
-  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .3em .8em; color: var(--muted); align-items: center; }
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "who date" "subj subj"; gap: .3em .8em; color: var(--muted); align-items: center; }
+.mail .from { grid-area: who; }
+.mail :is(.date, .tools) { grid-area: date; justify-self: end; }
+.mail .fold { display: none; grid-area: fold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .9em; }
 .mail:hover { background: var(--panel-2); }
 .mail.on { background: var(--sel); }
 .mail .from { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mail .date { font-size: .82em; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.mail .subj { grid-column: 1 / -1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail .subj { grid-area: subj; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mail .tools { display: none; gap: .3em; }
 .mail .tools button { font-size: .8em; border: 1px solid var(--line); background: var(--panel); color: var(--muted); border-radius: .4em; padding: .2em .55em; cursor: pointer; }
 .mail .tools button.del:hover { color: var(--danger); border-color: var(--danger); }
@@ -104,12 +119,17 @@ button:focus-visible, input:focus-visible, .mail:focus-visible, .folder:focus-vi
 .mail.unread .subj { font-weight: 600; }
 .mail.unread .date { color: var(--accent); font-weight: 600; }
 
-/* Breite Übersicht ohne Lesebereich: eine Zeile pro Mail */
+/* Breite Übersicht ohne Lesebereich: Spalten Von/An | Ordner | Betreff | Datum */
 @media (min-width: 1000px) {
-  .main:not(.open) .mail { grid-template-columns: 16em minmax(0, 1fr) 9em; padding-block: .85em; }
-  .main:not(.open) .mail .subj { grid-column: 2; grid-row: 1; }
-  .main:not(.open) .mail :is(.date, .tools) { grid-column: 3; grid-row: 1; justify-self: end; }
+  .main:not(.open) .cols { display: grid; grid-template-columns: 16em 10em minmax(0, 1fr) 9em; gap: .3em .8em; padding: .55em 1.2em .55em 1.9em; background: var(--panel-2); }
+  .main:not(.open) .cols span { font-size: .75em; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
+  .main:not(.open) .cols .c-date { text-align: right; }
+  .main:not(.open) .mail { grid-template-columns: 16em 10em minmax(0, 1fr) 9em; grid-template-areas: "who fold subj date"; padding-block: .85em; }
+  .main:not(.open) .mail .fold { display: block; }
+  .main:not(.open) .mail .subj .tag { display: none; }
   .main:not(.open) .mail.unread::after { top: 50%; transform: translateY(-50%); }
+  .main:not(.open) .list > .mails { border-top-width: 1px; }
+  .main:not(.open) .cols { border-top: 3px solid var(--line-strong); }
 }
 
 /* Lesebereich */
@@ -135,12 +155,9 @@ button:focus-visible, input:focus-visible, .mail:focus-visible, .folder:focus-vi
 
 /* Schmal (z.B. Surface): schmale Ordnerleiste, geöffnete Mail ersetzt die Liste */
 @media (max-width: 1000px) {
-  .app { grid-template-columns: 4.2em minmax(0, 1fr); }
+  .body { grid-template-columns: 4.2em minmax(0, 1fr); }
   .side { padding: 1em .45em; align-items: center; }
   .side h2, .folder .lbl, .new .lbl { display: none; }
-  .display-btn { display: block; margin-top: auto; padding: .4em .6em; }
-  .side-foot { display: none; }
-  .side-foot.pop { display: flex; position: fixed; left: 4.6em; bottom: 1em; z-index: 5; background: var(--panel); border: 1px solid var(--line); border-radius: .8em; padding: 1em; box-shadow: 0 8px 30px rgb(0 0 0 / .25); width: 16em; }
   .new { padding: .7em; text-align: center; width: 2.6em; }
   .folder { justify-content: center; position: relative; padding: .45em 0 !important; }
   .folder .dotf { display: none; }
@@ -151,7 +168,6 @@ button:focus-visible, input:focus-visible, .mail:focus-visible, .folder:focus-vi
   .main.open .list { display: none; }
 }
 @media (max-width: 560px) {
-  .app { grid-template-columns: minmax(0, 1fr); }
+  .body { grid-template-columns: minmax(0, 1fr); }
   .side { display: none; }
 }
-@media (min-width: 1001px) { .side-foot.pop { display: flex; } }

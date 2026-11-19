@@ -30,43 +30,59 @@
 
   <!-- Hauptfenster -->
   <div class="app" id="app" hidden>
-    <nav class="side" aria-label="Ordner">
-      <button class="new" type="button" id="btn-new" title="Neue Nachricht (kommt bald)">✎ <span class="lbl">Neue Nachricht</span></button>
-      <div class="folders" id="folders"></div>
-      <button class="icon display-btn" id="btn-display" type="button" title="Darstellung">Aa</button>
-      <div class="side-foot" id="side-foot">
-        <div class="seg small" role="group" aria-label="Farbschema">
+    <!-- Zeile 1: Einstellungen für das ganze Programm -->
+    <header class="topbar" id="topbar">
+      <div class="tb-group testmode" id="tm-group">
+        <span class="tb-label">Testmodus:</span>
+        <div class="seg" role="group" aria-label="Testmodus">
+          <button id="tm-on" type="button">Einschalten</button>
+          <button id="tm-off" type="button">Ausschalten</button>
+        </div>
+        <span class="tb-note" id="tm-note"></span>
+      </div>
+      <div class="tb-group">
+        <span class="tb-label">Darstellung:</span>
+        <div class="seg" role="group" aria-label="Farbschema">
           <button id="t-auto" type="button" title="Wie das System">Auto</button>
           <button id="t-dark" type="button">Dunkel</button>
           <button id="t-light" type="button">Hell</button>
         </div>
-        <label class="size" for="sz"><span class="lbl">Schriftgröße</span>
-          <input id="sz" type="range" min="0.85" max="1.5" step="0.05" value="1"></label>
-        <button class="link" id="btn-testmode-on" type="button" hidden><span class="lbl">Testmodus einschalten</span></button>
-        <button class="link" id="btn-logout" type="button"><span class="lbl">Abmelden</span></button>
       </div>
-    </nav>
+      <label class="tb-group" for="sz"><span class="tb-label">Schriftgröße:</span>
+        <span class="a-small" aria-hidden="true">A</span>
+        <input id="sz" type="range" min="0.85" max="1.5" step="0.05" value="1">
+        <span class="a-big" aria-hidden="true">A</span></label>
+      <button class="tb-btn" id="btn-logout" type="button">Abmelden</button>
+    </header>
 
-    <div class="main" id="main">
-      <section class="list" aria-label="Nachrichten">
-        <div class="testbar" id="testbar">
-          <span><b>Testmodus</b> · Auf dem Server wird nichts geändert. Löschen und Gelesen-Markieren passieren nur in der App.</span>
-          <button type="button" id="btn-testmode-off">Ausschalten</button>
-        </div>
-        <div class="listhead">
-          <div class="t"><h3 id="ftitle">Posteingang</h3><span class="c" id="sum"></span>
-            <button class="icon" id="btn-refresh" type="button" title="Aktualisieren">↻</button></div>
-          <div class="find">
-            <input class="search" id="q" type="search" placeholder="Nachrichten durchsuchen">
-            <div class="seg" role="group" aria-label="Suchbereich">
-              <button id="s-folder" type="button" aria-pressed="true">Dieser Ordner</button>
-              <button id="s-all" type="button" aria-pressed="false">Alle Ordner</button>
+    <div class="body">
+      <nav class="side" aria-label="Ordner">
+        <button class="new" type="button" id="btn-new" title="Neue Nachricht (kommt bald)">✎ <span class="lbl">Neue Nachricht</span></button>
+        <div class="folders" id="folders"></div>
+      </nav>
+
+      <div class="main" id="main">
+        <section class="list" aria-label="Nachrichten">
+          <!-- Zeile 2: Ordner, Zähler, Suche -->
+          <div class="listhead">
+            <h3 id="ftitle">Posteingang</h3>
+            <div class="counts"><span id="sum"></span>
+              <button class="icon" id="btn-refresh" type="button" title="Neue Mails abrufen">↻ Abrufen</button></div>
+            <div class="find">
+              <input class="search" id="q" type="search" placeholder="Nachrichten durchsuchen">
+              <div class="seg" role="group" aria-label="Suchbereich">
+                <button id="s-folder" type="button" aria-pressed="true">Dieser Ordner</button>
+                <button id="s-all" type="button" aria-pressed="false">Alle Ordner</button>
+              </div>
             </div>
           </div>
-        </div>
-        <div class="mails" id="mails" tabindex="0" aria-label="Nachrichtenliste. Pfeiltasten wählen aus, Enter öffnet, Entf löscht, Rücktaste schließt."></div>
-      </section>
-      <article class="read" id="read"></article>
+          <div class="cols" id="cols" aria-hidden="true">
+            <span id="col-who">Von</span><span>Ordner</span><span>Betreff</span><span class="c-date">Datum</span>
+          </div>
+          <div class="mails" id="mails" tabindex="0" aria-label="Nachrichtenliste. Pfeiltasten wählen aus, Enter öffnet, Entf löscht, Rücktaste schließt."></div>
+        </section>
+        <article class="read" id="read"></article>
+      </div>
     </div>
 
     <div class="toast" id="toast" hidden></div>
