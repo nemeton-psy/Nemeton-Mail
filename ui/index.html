@@ -42,12 +42,17 @@
         </div>
         <label class="size" for="sz"><span class="lbl">Schriftgröße</span>
           <input id="sz" type="range" min="0.85" max="1.5" step="0.05" value="1"></label>
+        <button class="link" id="btn-testmode-on" type="button" hidden><span class="lbl">Testmodus einschalten</span></button>
         <button class="link" id="btn-logout" type="button"><span class="lbl">Abmelden</span></button>
       </div>
     </nav>
 
     <div class="main" id="main">
       <section class="list" aria-label="Nachrichten">
+        <div class="testbar" id="testbar">
+          <span><b>Testmodus</b> · Auf dem Server wird nichts geändert. Löschen und Gelesen-Markieren passieren nur in der App.</span>
+          <button type="button" id="btn-testmode-off">Ausschalten</button>
+        </div>
         <div class="listhead">
           <div class="t"><h3 id="ftitle">Posteingang</h3><span class="c" id="sum"></span>
             <button class="icon" id="btn-refresh" type="button" title="Aktualisieren">↻</button></div>

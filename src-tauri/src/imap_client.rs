@@ -60,7 +60,13 @@ pub struct FullMessage {
 pub struct MailClient {
     session: Session,
     selected: Option<String>,
+    /// Testmodus: Nur lesen. Ordner werden mit EXAMINE geöffnet, Mails mit
+    /// BODY.PEEK geladen, und Löschen oder Markieren wird abgelehnt.
+    /// So ändert sich auf dem Server garantiert nichts.
+    pub read_only: bool,
 }
+
+const READ_ONLY_MSG: &str = "Testmodus ist an: Auf dem Server wird nichts geändert.";
 
 fn err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
@@ -74,13 +80,18 @@ impl MailClient {
         let session = client
             .login(&acc.email, &acc.password)
             .map_err(|_| "Anmeldung fehlgeschlagen. Bitte E-Mail-Adresse und Passwort prüfen.".to_string())?;
-        Ok(Self { session, selected: None })
+        Ok(Self { session, selected: None, read_only: true })
     }
 
     fn select(&mut self, folder: &str) -> Result<(), String> {
-        if self.selected.as_deref() != Some(folder) {
-            self.session.select(folder).map_err(err)?;
-            self.selected = Some(folder.to_string());
+        let tag = format!("{}|{}", self.read_only, folder);
+        if self.selected.as_deref() != Some(tag.as_str()) {
+            if self.read_only {
+                self.session.examine(folder).map_err(err)?;
+            } else {
+                self.session.select(folder).map_err(err)?;
+            }
+            self.selected = Some(tag);
         }
         Ok(())
     }
@@ -174,10 +185,12 @@ impl MailClient {
         Ok(out)
     }
 
-    /// Lädt eine Mail vollständig. Das markiert sie auf dem Server als gelesen.
+    /// Lädt eine Mail vollständig. Außerhalb des Testmodus markiert das sie auf
+    /// dem Server als gelesen.
     pub fn get_message(&mut self, folder: &str, uid: u32) -> Result<FullMessage, String> {
         self.select(folder)?;
-        let fetches = self.session.uid_fetch(uid.to_string(), "(UID BODY[])").map_err(err)?;
+        let query = if self.read_only { "(UID BODY.PEEK[])" } else { "(UID BODY[])" };
+        let fetches = self.session.uid_fetch(uid.to_string(), query).map_err(err)?;
         let f = fetches.iter().next().ok_or("Mail nicht gefunden.")?;
         let body = f.body().ok_or("Mail ist leer.")?;
         let parsed = mailparse::parse_mail(body).map_err(err)?;
@@ -201,6 +214,9 @@ impl MailClient {
     }
 
     pub fn set_seen(&mut self, folder: &str, uid: u32, seen: bool) -> Result<(), String> {
+        if self.read_only {
+            return Err(READ_ONLY_MSG.into());
+        }
         self.select(folder)?;
         let op = if seen { "+FLAGS.SILENT (\\Seen)" } else { "-FLAGS.SILENT (\\Seen)" };
         self.session.uid_store(uid.to_string(), op).map_err(err)?;
@@ -210,6 +226,9 @@ impl MailClient {
     /// Verschiebt die Mail in den Papierkorb. Liegt sie schon dort, wird sie
     /// endgültig gelöscht.
     pub fn delete(&mut self, folder: &str, uid: u32) -> Result<(), String> {
+        if self.read_only {
+            return Err(READ_ONLY_MSG.into());
+        }
         let trash = self
             .list_folders()?
             .into_iter()

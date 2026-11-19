@@ -2,6 +2,12 @@
 
 Ein eigenes, schlankes E-Mail-Programm für macOS und Windows.
 
+## Testmodus (Standard: an)
+
+Solange der **Testmodus** an ist (gelber Balken oben), ändert die App auf dem Mailserver nichts:
+Ordner werden nur zum Lesen geöffnet, Mails bleiben dort ungelesen, und Löschen oder Markieren passiert nur in der App.
+Ausschalten über „Ausschalten“ im gelben Balken (mit Bestätigung), wieder einschalten unten links.
+
 ## Was es schon kann (Version 0.1)
 
 - Mit dem eigenen Postfach verbinden (für Posteo voreingestellt). Das Passwort liegt im Schlüsselbund des Computers.

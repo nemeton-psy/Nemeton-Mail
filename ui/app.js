@@ -15,6 +15,9 @@ const S = {
   scope: "folder",   // Suche: "folder" oder "all"
   query: "",
   searching: false,
+  testMode: true,    // Testmodus: auf dem Server wird nichts geändert
+  hidden: new Set(), // im Testmodus "gelöschte" Mails (nur in der App ausgeblendet)
+  localSeen: new Map(), // im Testmodus geänderter Gelesen-Status
 };
 const key = (m) => m.folder + "|" + m.uid;
 const find = (k) => S.list.find((m) => key(m) === k);
@@ -70,6 +73,7 @@ async function start() {
   applySize(load("scale") || "1");
   const acc = await invoke("get_account");
   if (!acc) return showSetup();
+  setTestMode(acc.test_mode !== false);
   showApp();
 }
 
@@ -100,6 +104,7 @@ $("setup-form").addEventListener("submit", async (e) => {
       port: Number($("s-port").value) || 993,
     });
     $("s-pass").value = "";
+    setTestMode(true);
     showApp();
   } catch (err) {
     showSetup(String(err));
@@ -153,7 +158,7 @@ async function reloadList() {
   $("ftitle").textContent = folderName(S.folder);
   if (!S.list.length) $("mails").innerHTML = `<div class="empty">Lade Nachrichten …</div>`;
   try {
-    S.list = await invoke("list_messages", { folder: S.folder, limit: 300 });
+    S.list = applyLocal(await invoke("list_messages", { folder: S.folder, limit: 300 }));
   } catch (err) {
     S.list = [];
     toast("Nachrichten konnten nicht geladen werden: " + err, true);
@@ -180,7 +185,7 @@ async function runSearch() {
   if (!S.query) return reloadList();
   S.searching = true; render();
   try {
-    S.list = await invoke("search", { query: S.query, folder: S.scope === "all" ? null : S.folder });
+    S.list = applyLocal(await invoke("search", { query: S.query, folder: S.scope === "all" ? null : S.folder }));
   } catch (err) {
     S.list = [];
     toast("Suche fehlgeschlagen: " + err, true);
@@ -251,6 +256,39 @@ function row(m, showFolder) {
   return el;
 }
 
+/* ---------- Testmodus ---------- */
+function applyLocal(list) {
+  if (!S.testMode) return list;
+  return list
+    .filter((m) => !S.hidden.has(key(m)))
+    .map((m) => (S.localSeen.has(key(m)) ? { ...m, seen: S.localSeen.get(key(m)) } : m));
+}
+function setTestMode(on) {
+  S.testMode = on;
+  $("testbar").hidden = !on;
+  $("btn-testmode-on").hidden = on;
+  $("btn-testmode-off").textContent = "Ausschalten";
+  delete $("btn-testmode-off").dataset.confirm;
+  if (!on) { S.hidden.clear(); S.localSeen.clear(); }
+}
+$("btn-testmode-off").onclick = async () => {
+  const b = $("btn-testmode-off");
+  if (!b.dataset.confirm) {
+    b.dataset.confirm = "1";
+    b.textContent = "Wirklich? Dann wird Löschen und Markieren auf dem Server ausgeführt. Klick zum Bestätigen";
+    return;
+  }
+  await invoke("set_test_mode", { on: false });
+  setTestMode(false);
+  toast("Testmodus aus: Änderungen gehen jetzt an den Server.");
+  reloadList();
+};
+$("btn-testmode-on").onclick = async () => {
+  await invoke("set_test_mode", { on: true });
+  setTestMode(true);
+  toast("Testmodus an: Auf dem Server wird nichts geändert.");
+};
+
 /* ---------- Aktionen ---------- */
 function bumpUnread(folder, delta) {
   const f = S.folders.find((x) => x.id === folder);
@@ -260,6 +298,7 @@ function bumpUnread(folder, delta) {
 async function toggleSeen(m) {
   const seen = !m.seen;
   m.seen = seen; bumpUnread(m.folder, seen ? -1 : 1); render();
+  if (S.testMode) { S.localSeen.set(key(m), seen); return; }
   try { await invoke("set_seen", { folder: m.folder, uid: m.uid, seen }); }
   catch (err) { m.seen = !seen; bumpUnread(m.folder, seen ? 1 : -1); render(); toast("Konnte nicht geändert werden: " + err, true); }
 }
@@ -269,7 +308,7 @@ async function openMail(k) {
   const m = find(k);
   if (!m) return;
   S.sel = k; S.opened = k;
-  if (!m.seen) { m.seen = true; bumpUnread(m.folder, -1); }
+  if (!m.seen) { m.seen = true; bumpUnread(m.folder, -1); if (S.testMode) S.localSeen.set(k, true); }
   render();
   const token = ++openToken;
   $("read").innerHTML = `<div class="loading">Lade Nachricht …</div>`;
@@ -330,6 +369,11 @@ async function remove(k) {
   if (wasOpen) S.opened = null;
   render();
   if (wasOpen && next) openMail(key(next));
+  if (S.testMode) {
+    S.hidden.add(k);
+    toast("Testmodus: nur in der App ausgeblendet. Auf dem Server bleibt die Mail.");
+    return;
+  }
   try {
     await invoke("delete_message", { folder: m.folder, uid: m.uid });
     toast("In den Papierkorb verschoben: " + (m.subject || "(kein Betreff)"));

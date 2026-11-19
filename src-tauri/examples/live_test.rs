@@ -6,6 +6,18 @@ fn main() {
     let env = |k: &str| std::env::var(k).expect(k);
     let acc = Account { email: env("NM_USER"), password: env("NM_PASS"), host: env("NM_HOST"), port: env("NM_PORT").parse().unwrap() };
     let mut c = MailClient::connect(&acc).expect("connect");
+    // Testmodus (Standard): nichts darf sich ändern.
+    assert!(c.read_only);
+    let before = c.list_messages("INBOX", 300).unwrap();
+    let u = before.iter().find(|m| !m.seen).expect("ungelesene Mail").uid;
+    c.get_message("INBOX", u).unwrap();
+    let still = c.list_messages("INBOX", 300).unwrap().iter().find(|m| m.uid == u).unwrap().seen;
+    println!("TESTMODUS nach Öffnen gelesen={still}");
+    assert!(!still);
+    println!("TESTMODUS löschen: {:?}", c.delete("INBOX", u).err());
+    println!("TESTMODUS markieren: {:?}", c.set_seen("INBOX", u, true).err());
+    assert_eq!(c.list_messages("INBOX", 300).unwrap().len(), before.len());
+    c.read_only = false;
     let folders = c.list_folders().expect("folders");
     for f in &folders { println!("ORDNER {:<12} {:<12} rolle={:<7} ungelesen={} gesamt={}", f.id, f.name, f.role, f.unseen, f.total); }
     let list = c.list_messages("INBOX", 300).expect("list");
@@ -22,7 +34,7 @@ fn main() {
         println!("SUCHE ALLE {q:?}: {:?}", r.iter().map(|m| (&m.folder, &m.subject)).collect::<Vec<_>>());
     }
     println!("SUCHE INBOX 'Rechnung': {}", c.search("Rechnung", Some("INBOX")).unwrap().len());
-    let victim = list.iter().find(|m| m.subject.starts_with("Black")).unwrap().uid;
+    let victim = list.last().unwrap().uid;
     c.delete("INBOX", victim).expect("delete");
     println!("NACH LÖSCHEN INBOX: {}", c.list_messages("INBOX", 300).unwrap().len());
     println!("PAPIERKORB: {:?}", c.list_messages("Trash", 300).unwrap().iter().map(|m| &m.subject).collect::<Vec<_>>());
