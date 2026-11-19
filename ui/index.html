@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nemeton Mail</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Einrichtung beim ersten Start -->
+  <main class="setup" id="setup" hidden>
+    <form class="setup-card" id="setup-form" autocomplete="on">
+      <h1>Nemeton Mail</h1>
+      <p>Melde dich mit deinem Postfach an. Das Passwort wird sicher im Schlüsselbund deines Computers gespeichert.</p>
+      <label for="s-email">E-Mail-Adresse</label>
+      <input id="s-email" type="email" required autocomplete="username">
+      <label for="s-pass">Passwort</label>
+      <input id="s-pass" type="password" required autocomplete="current-password">
+      <details>
+        <summary>Server (für Posteo schon richtig eingestellt)</summary>
+        <div class="row2">
+          <div><label for="s-host">IMAP-Server</label><input id="s-host" value="posteo.de"></div>
+          <div><label for="s-port">Port</label><input id="s-port" type="number" value="993"></div>
+        </div>
+      </details>
+      <p class="error" id="s-error" hidden></p>
+      <button class="primary" id="s-submit" type="submit">Verbinden</button>
+    </form>
+  </main>
+
+  <!-- Hauptfenster -->
+  <div class="app" id="app" hidden>
+    <nav class="side" aria-label="Ordner">
+      <button class="new" type="button" id="btn-new" title="Neue Nachricht (kommt bald)">✎ <span class="lbl">Neue Nachricht</span></button>
+      <div class="folders" id="folders"></div>
+      <button class="icon display-btn" id="btn-display" type="button" title="Darstellung">Aa</button>
+      <div class="side-foot" id="side-foot">
+        <div class="seg small" role="group" aria-label="Farbschema">
+          <button id="t-auto" type="button" title="Wie das System">Auto</button>
+          <button id="t-dark" type="button">Dunkel</button>
+          <button id="t-light" type="button">Hell</button>
+        </div>
+        <label class="size" for="sz"><span class="lbl">Schriftgröße</span>
+          <input id="sz" type="range" min="0.85" max="1.5" step="0.05" value="1"></label>
+        <button class="link" id="btn-logout" type="button"><span class="lbl">Abmelden</span></button>
+      </div>
+    </nav>
+
+    <div class="main" id="main">
+      <section class="list" aria-label="Nachrichten">
+        <div class="listhead">
+          <div class="t"><h3 id="ftitle">Posteingang</h3><span class="c" id="sum"></span>
+            <button class="icon" id="btn-refresh" type="button" title="Aktualisieren">↻</button></div>
+          <div class="find">
+            <input class="search" id="q" type="search" placeholder="Nachrichten durchsuchen">
+            <div class="seg" role="group" aria-label="Suchbereich">
+              <button id="s-folder" type="button" aria-pressed="true">Dieser Ordner</button>
+              <button id="s-all" type="button" aria-pressed="false">Alle Ordner</button>
+            </div>
+          </div>
+        </div>
+        <div class="mails" id="mails" tabindex="0" aria-label="Nachrichtenliste. Pfeiltasten wählen aus, Enter öffnet, Entf löscht, Rücktaste schließt."></div>
+      </section>
+      <article class="read" id="read"></article>
+    </div>
+
+    <div class="toast" id="toast" hidden></div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

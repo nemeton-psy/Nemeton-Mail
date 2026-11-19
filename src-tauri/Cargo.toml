@@ -1,0 +1,25 @@
+[package]
+name = "nemeton-mail"
+version = "0.1.0"
+description = "Nemeton Mail"
+edition = "2021"
+
+[lib]
+name = "nemeton_mail_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+imap = "2.4.1"
+native-tls = "0.2"
+mailparse = "0.15"
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+
+[profile.release]
+strip = true
+lto = true
