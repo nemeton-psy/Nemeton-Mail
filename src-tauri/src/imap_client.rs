@@ -260,6 +260,24 @@ impl MailClient {
         Ok(())
     }
 
+    /// Verschiebt eine Mail in einen anderen Ordner.
+    pub fn move_to(&mut self, folder: &str, uid: u32, target: &str) -> Result<(), String> {
+        if self.read_only {
+            return Err(READ_ONLY_MSG.into());
+        }
+        if folder == target {
+            return Ok(());
+        }
+        self.select(folder)?;
+        let id = uid.to_string();
+        if self.session.uid_mv(&id, target).is_err() {
+            self.session.uid_copy(&id, target).map_err(err)?;
+            self.session.uid_store(&id, "+FLAGS.SILENT (\\Deleted)").map_err(err)?;
+            self.session.uid_expunge(&id).map_err(err)?;
+        }
+        Ok(())
+    }
+
     /// Sucht in Absender, Betreff und Text. Ohne Ordner: in allen Ordnern
     /// außer Papierkorb und Spam.
     pub fn search(&mut self, query: &str, folder: Option<&str>) -> Result<Vec<Summary>, String> {

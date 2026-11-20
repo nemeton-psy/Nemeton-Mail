@@ -16,8 +16,13 @@ fn main() {
     assert!(!still);
     println!("TESTMODUS löschen: {:?}", c.delete("INBOX", u).err());
     println!("TESTMODUS markieren: {:?}", c.set_seen("INBOX", u, true).err());
+    println!("TESTMODUS verschieben: {:?}", c.move_to("INBOX", u, "Rechnungen").err());
     assert_eq!(c.list_messages("INBOX", 300).unwrap().len(), before.len());
     c.read_only = false;
+    c.move_to("INBOX", u, "Rechnungen").expect("move");
+    println!("VERSCHOBEN: INBOX={} Rechnungen={:?}", c.list_messages("INBOX", 300).unwrap().len(), c.list_messages("Rechnungen", 300).unwrap().iter().map(|m| &m.subject).collect::<Vec<_>>());
+    let back = c.list_messages("Rechnungen", 300).unwrap().into_iter().max_by_key(|m| m.uid).unwrap().uid;
+    c.move_to("Rechnungen", back, "INBOX").expect("move back");
     let folders = c.list_folders().expect("folders");
     for f in &folders { println!("ORDNER {:<12} {:<12} rolle={:<7} ungelesen={} gesamt={}", f.id, f.name, f.role, f.unseen, f.total); }
     let list = c.list_messages("INBOX", 300).expect("list");

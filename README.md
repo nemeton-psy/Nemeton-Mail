@@ -16,7 +16,8 @@ Ein- und Ausschalten oben in der Programmleiste („Testmodus: Einschalten / Aus
 - **Doppelklick** oder **Enter** öffnet die Mail rechts im selben Fenster
 - **Entf** verschiebt die Mail in den Papierkorb, der Lesebereich bleibt offen und zeigt die nächste Mail
 - **Rücktaste** oder **Esc** schließt den Lesebereich
-- Gelesen/ungelesen per Knopf in der Zeile
+- Rechtsklick auf eine Mail: Öffnen, Gelesen/Ungelesen, Verschieben in (alle Ordner), Löschen
+- Mails mit der Maus auf einen Ordner ziehen, um sie zu verschieben
 - Suche in **diesem Ordner** oder in **allen Ordnern**
 - Hell, Dunkel oder wie das System; Schriftgröße per Regler (nur die Schrift wächst, die Aufteilung bleibt)
 - Ordnerleiste und Lesebereich mit der Maus breiter oder schmaler ziehen (Doppelklick auf den Rand setzt zurück)

@@ -107,18 +107,28 @@ body.dragging iframe { pointer-events: none; }
 .mail { position: relative; padding: .95em 1.2em .95em 1.9em; border-bottom: 1px solid var(--line); user-select: none;
   display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "who date" "subj subj"; gap: .3em .8em; color: var(--muted); align-items: center; }
 .mail .from { grid-area: who; }
-.mail :is(.date, .tools) { grid-area: date; justify-self: end; }
+.mail .date { grid-area: date; justify-self: end; }
 .mail .fold { display: none; grid-area: fold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .9em; }
 .mail:hover { background: var(--panel-2); }
 .mail.on { background: var(--sel); }
 .mail .from { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mail .date { font-size: .82em; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .mail .subj { grid-area: subj; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mail .tools { display: none; gap: .3em; }
-.mail .tools button { font-size: .8em; border: 1px solid var(--line); background: var(--panel); color: var(--muted); border-radius: .4em; padding: .2em .55em; cursor: pointer; }
-.mail .tools button.del:hover { color: var(--danger); border-color: var(--danger); }
-.mail:hover .tools, .mail.on .tools { display: inline-flex; }
-.mail:hover .date, .mail.on .date { display: none; }
+.mail { cursor: default; }
+.mail.dragging { opacity: .45; }
+.folder.drop { background: var(--accent); color: #fff; }
+.folder.drop .n { color: #fff; }
+
+/* Rechtsklick-Menü */
+.menu { position: fixed; z-index: 20; min-width: 15em; padding: .35em; background: var(--panel); border: 1px solid var(--line); border-radius: .6em;
+  box-shadow: 0 10px 30px rgb(0 0 0 / .22); display: flex; flex-direction: column; font-size: .95em; }
+.menu .mi { position: relative; border: 0; background: none; text-align: left; padding: .5em .9em; border-radius: .4em; cursor: default; white-space: nowrap; }
+.menu .mi:hover, .menu .mi:focus-visible { background: var(--sel); }
+.menu .mi.danger { color: var(--danger); }
+.menu .has-sub::after { content: "›"; position: absolute; right: .8em; color: var(--muted); }
+.menu .sep { height: 1px; background: var(--line); margin: .3em .2em; }
+.menu.sub { position: absolute; top: 0; display: none; max-height: 70vh; overflow-y: auto; font-size: 1em; }
+.menu.sub.show { display: flex; }
 .tag { font-size: .8em; background: var(--accent-soft); color: var(--accent); padding: .1em .5em; border-radius: .4em; margin-right: .5em; font-weight: 600; }
 /* Ungelesen: Balken, Punkt, volle Farbe, fett */
 .mail.unread { color: var(--fg); }

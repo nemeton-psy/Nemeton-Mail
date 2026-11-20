@@ -173,6 +173,11 @@ async fn delete_message(app: tauri::AppHandle, folder: String, uid: u32) -> Resu
 }
 
 #[tauri::command]
+async fn move_message(app: tauri::AppHandle, folder: String, uid: u32, target: String) -> Result<(), String> {
+    blocking(app, move |c| c.move_to(&folder, uid, &target)).await
+}
+
+#[tauri::command]
 async fn search(app: tauri::AppHandle, query: String, folder: Option<String>) -> Result<Vec<Summary>, String> {
     blocking(app, move |c| c.search(&query, folder.as_deref())).await
 }
@@ -191,6 +196,7 @@ pub fn run() {
             get_message,
             set_seen,
             delete_message,
+            move_message,
             search
         ])
         .run(tauri::generate_context!())

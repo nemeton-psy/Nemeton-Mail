@@ -202,6 +202,19 @@ function renderFolders() {
     b.querySelector(".lbl").textContent = f.name;
     b.querySelector(".n").textContent = f.unseen || "";
     b.onclick = () => openFolder(f.id);
+    b.addEventListener("dragover", (e) => {
+      if (!e.dataTransfer.types.includes("text/x-nemeton-mail")) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      b.classList.add("drop");
+    });
+    b.addEventListener("dragleave", () => b.classList.remove("drop"));
+    b.addEventListener("drop", (e) => {
+      e.preventDefault();
+      b.classList.remove("drop");
+      const k = e.dataTransfer.getData("text/x-nemeton-mail");
+      if (k) moveMail(k, f.id);
+    });
     box.appendChild(b);
   }
 }
@@ -300,7 +313,7 @@ function row(m, showFolder) {
   const el = document.createElement("div");
   const k = key(m);
   el.className = "mail" + (m.seen ? "" : " unread") + (k === S.sel ? " on" : "");
-  el.innerHTML = `<span class="from"></span><span class="fold"></span><span class="date"></span><span class="tools"><button class="rd" type="button"></button><button class="del" type="button">Löschen</button></span><span class="subj"></span>`;
+  el.innerHTML = `<span class="from"></span><span class="fold"></span><span class="date"></span><span class="subj"></span>`;
   const sent = isSentFolder(m.folder);
   el.querySelector(".from").textContent = sent ? "An: " + (m.to || "(unbekannt)") : (m.from || m.from_addr || "(unbekannt)");
   el.querySelector(".from").title = sent ? m.to : m.from_addr;
@@ -311,13 +324,22 @@ function row(m, showFolder) {
     const t = document.createElement("span"); t.className = "tag"; t.textContent = folderName(m.folder);
     el.querySelector(".subj").prepend(t);
   }
-  const rd = el.querySelector(".rd");
-  rd.textContent = m.seen ? "Ungelesen" : "Gelesen";
-  rd.title = m.seen ? "Als ungelesen markieren" : "Als gelesen markieren";
-  rd.onclick = (e) => { e.stopPropagation(); toggleSeen(m); };
-  el.querySelector(".del").onclick = (e) => { e.stopPropagation(); remove(k); };
   el.onclick = () => { S.sel = k; render(); $("mails").focus(); };
   el.ondblclick = () => openMail(k);
+  // Ziehen in einen Ordner
+  el.draggable = true;
+  el.addEventListener("dragstart", (e) => {
+    e.dataTransfer.setData("text/x-nemeton-mail", k);
+    e.dataTransfer.effectAllowed = "move";
+    el.classList.add("dragging");
+  });
+  el.addEventListener("dragend", () => el.classList.remove("dragging"));
+  // Rechtsklick-Menü
+  el.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    S.sel = k; render();
+    showMenu(e.clientX, e.clientY, k);
+  });
   return el;
 }
 
@@ -462,9 +484,11 @@ function closeMail() {
   $("mails").focus();
 }
 
-async function remove(k) {
+// Nimmt eine Mail aus der Liste (nach Löschen oder Verschieben).
+// Ist sie gerade geöffnet, wird die nächste geöffnet.
+function takeOut(k) {
   const i = S.list.findIndex((m) => key(m) === k);
-  if (i < 0) return;
+  if (i < 0) return null;
   const m = S.list[i];
   const next = S.list[i + 1] || S.list[i - 1];
   const wasOpen = S.opened === k;
@@ -474,21 +498,111 @@ async function remove(k) {
   if (wasOpen) S.opened = null;
   render();
   if (wasOpen && next) openMail(key(next));
+  return { m, i };
+}
+function putBack({ m, i }) {
+  S.list.splice(i, 0, m);
+  if (!m.seen) bumpUnread(m.folder, 1);
+  render();
+}
+
+async function remove(k) {
+  const t = takeOut(k);
+  if (!t) return;
   if (S.testMode) {
     S.hidden.add(k);
     toast("Testmodus: nur in der App ausgeblendet. Auf dem Server bleibt die Mail.");
     return;
   }
   try {
-    await invoke("delete_message", { folder: m.folder, uid: m.uid });
-    toast("In den Papierkorb verschoben: " + (m.subject || "(kein Betreff)"));
+    await invoke("delete_message", { folder: t.m.folder, uid: t.m.uid });
+    toast("In den Papierkorb verschoben: " + (t.m.subject || "(kein Betreff)"));
     loadFolders();
   } catch (err) {
-    S.list.splice(i, 0, m);
-    render();
+    putBack(t);
     toast("Löschen fehlgeschlagen: " + err, true);
   }
 }
+
+async function moveMail(k, target) {
+  const m = find(k);
+  if (!m || m.folder === target) return;
+  const name = folderName(target);
+  const t = takeOut(k);
+  if (S.testMode) {
+    S.hidden.add(k);
+    toast(`Testmodus: nur in der App nach „${name}“ verschoben. Auf dem Server bleibt alles, wie es ist.`);
+    return;
+  }
+  try {
+    await invoke("move_message", { folder: t.m.folder, uid: t.m.uid, target });
+    toast(`Verschoben nach „${name}“.`);
+    loadFolders();
+  } catch (err) {
+    putBack(t);
+    toast("Verschieben fehlgeschlagen: " + err, true);
+  }
+}
+
+/* ---------- Rechtsklick-Menü ---------- */
+const menu = document.createElement("div");
+menu.className = "menu"; menu.hidden = true; menu.setAttribute("role", "menu");
+document.body.appendChild(menu);
+function hideMenu() { menu.hidden = true; menu.innerHTML = ""; }
+function menuItem(parent, label, action, opts = {}) {
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "mi" + (opts.danger ? " danger" : ""); b.setAttribute("role", "menuitem");
+  b.textContent = label;
+  if (opts.sub) b.classList.add("has-sub");
+  if (action) b.onclick = () => { hideMenu(); action(); };
+  parent.appendChild(b);
+  return b;
+}
+function showMenu(x, y, k) {
+  const m = find(k);
+  if (!m) return;
+  menu.innerHTML = "";
+  menuItem(menu, "Öffnen", () => openMail(k));
+  menuItem(menu, m.seen ? "Als ungelesen markieren" : "Als gelesen markieren", () => toggleSeen(m));
+  const sep = document.createElement("div"); sep.className = "sep"; menu.appendChild(sep);
+  const mv = menuItem(menu, "Verschieben in", null, { sub: true });
+  const sub = document.createElement("div");
+  sub.className = "menu sub"; sub.setAttribute("role", "menu");
+  for (const f of S.folders) {
+    if (f.id === m.folder) continue;
+    const b = menuItem(sub, f.name, () => moveMail(k, f.id));
+    b.style.paddingLeft = (0.9 + f.depth * 0.9) + "em";
+  }
+  mv.appendChild(sub);
+  const openSub = () => {
+    sub.classList.add("show");
+    const r = mv.getBoundingClientRect(), sr = sub.getBoundingClientRect();
+    sub.style.left = (r.right + sr.width > innerWidth ? -sr.width + 4 : r.width - 4) + "px";
+    sub.style.top = Math.min(0, innerHeight - r.top - sr.height - 8) + "px";
+  };
+  mv.addEventListener("mouseenter", openSub);
+  mv.addEventListener("click", (e) => { e.stopPropagation(); openSub(); });
+  mv.addEventListener("mouseleave", () => sub.classList.remove("show"));
+  const sep2 = document.createElement("div"); sep2.className = "sep"; menu.appendChild(sep2);
+  menuItem(menu, "Löschen", () => remove(k), { danger: true });
+  menu.hidden = false;
+  const r = menu.getBoundingClientRect();
+  menu.style.left = Math.min(x, innerWidth - r.width - 8) + "px";
+  menu.style.top = Math.min(y, innerHeight - r.height - 8) + "px";
+}
+document.addEventListener("pointerdown", (e) => { if (!menu.hidden && !menu.contains(e.target)) hideMenu(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !menu.hidden) { e.stopPropagation(); hideMenu(); } }, true);
+addEventListener("blur", hideMenu);
+$("mails").addEventListener("scroll", hideMenu);
+
+/* ---------- Mausrad: mehr Zeilen pro Schritt ---------- */
+$("mails").addEventListener("wheel", (e) => {
+  if (e.ctrlKey || e.deltaX) return;
+  e.preventDefault();
+  const unit = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? $("mails").clientHeight : 1;
+  $("mails").scrollTop += e.deltaY * unit * 2.5;
+  hideMenu();
+}, { passive: false });
 
 /* ---------- Tastatur ---------- */
 $("mails").addEventListener("keydown", (e) => {
