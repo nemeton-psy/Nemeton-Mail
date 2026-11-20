@@ -123,6 +123,23 @@ fn set_test_mode(app: tauri::AppHandle, on: bool) -> Result<(), String> {
     std::fs::write(account_path(&app)?, serde_json::to_string_pretty(&acc).unwrap()).map_err(|e| e.to_string())
 }
 
+/// Öffnet einen Link aus einer Mail im normalen Browser bzw. Mailprogramm.
+/// Nur Webseiten (http/https) und E-Mail-Adressen (mailto) sind erlaubt,
+/// damit eine Mail keine Programme oder Dateien auf dem Computer starten kann.
+#[tauri::command]
+fn open_link(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let u = url.trim();
+    let lower = u.to_ascii_lowercase();
+    if !(lower.starts_with("https://") || lower.starts_with("http://") || lower.starts_with("mailto:")) {
+        return Err("Nur Webseiten und E-Mail-Adressen können geöffnet werden.".into());
+    }
+    if u.chars().any(|c| c.is_control()) {
+        return Err("Ungültiger Link.".into());
+    }
+    app.opener().open_url(u, None::<&str>).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn logout(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     if let Some(acc) = load_account(&app) {
@@ -185,12 +202,14 @@ async fn search(app: tauri::AppHandle, query: String, folder: Option<String>) ->
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             get_account,
             save_account,
             logout,
             set_test_mode,
+            open_link,
             list_folders,
             list_messages,
             get_message,

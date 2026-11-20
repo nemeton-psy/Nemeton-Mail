@@ -438,25 +438,79 @@ function showMessage(msg) {
   r.querySelector(".to").textContent = `an ${msg.to}${msg.cc ? ", Kopie: " + msg.cc : ""} · ${fmtLong(msg.date)}`;
   const atts = r.querySelector(".atts");
   for (const a of msg.attachments) { const s = document.createElement("span"); s.textContent = "📎 " + a; atts.appendChild(s); }
-  // Inhalt in einem abgeschotteten Rahmen: keine Skripte, keine Bilder aus dem Netz.
-  const base = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:">
-    <style>body{font-family:${getComputedStyle(document.body).fontFamily};font-size:15px;line-height:1.6;color:#18202c;margin:1.2em 1.6em;overflow-wrap:anywhere}
-    img,video{max-width:100%!important;height:auto!important}pre{white-space:pre-wrap}table{width:auto!important;max-width:100%!important}td,th{width:auto!important;overflow-wrap:anywhere}</style>`;
-  r.querySelector("iframe").srcdoc = msg.html
-    ? base + msg.html
-    : base + `<pre>${esc(msg.text || "(kein Inhalt)")}</pre>`;
-  const frame = r.querySelector("iframe");
-  frame.addEventListener("load", () => {
-    // Feste Bildgrößen entfernen: Bilder aus dem Netz sind gesperrt und
-    // würden sonst als leere Kästen die Mail unnötig breit machen.
-    for (const img of frame.contentDocument?.querySelectorAll("img") ?? []) {
-      img.removeAttribute("width");
-      img.removeAttribute("height");
-    }
-    fitMail();
-  });
+  // Externe Inhalte (Bilder, Schriften aus dem Netz) sind zuerst gesperrt:
+  // Beim Laden würde der Absender erfahren, dass und wann du die Mail liest.
+  const hasExternal = !!msg.html && /(src|background|srcset)\s*=\s*["']?\s*(https?:)?\/\/|url\(\s*["']?\s*(https?:)?\/\//i.test(msg.html);
+  const bar = document.createElement("div");
+  bar.className = "extbar";
+  bar.hidden = !hasExternal;
+  bar.innerHTML = `<span>Zum Schutz deiner Privatsphäre wurden externe Inhalte in dieser Nachricht blockiert.</span><button type="button">Externe Inhalte anzeigen</button>`;
+  r.querySelector(".read-body").before(bar);
+  bar.querySelector("button").onclick = () => { bar.hidden = true; renderBody(msg, true); };
+  const status = document.createElement("div");
+  status.className = "linkstatus"; status.hidden = true;
+  r.querySelector(".read-body").appendChild(status);
+  renderBody(msg, false);
   $("r-close").onclick = closeMail;
   $("r-del").onclick = () => remove(key(msg));
+}
+
+// Zeigt den Inhalt in einem abgeschotteten Rahmen: Skripte laufen nie,
+// Formulare werden nicht abgeschickt, und Bilder aus dem Netz nur, wenn
+// externe Inhalte erlaubt wurden.
+function renderBody(msg, external) {
+  const r = $("read");
+  const frame = r.querySelector("iframe");
+  const csp = external
+    ? "default-src 'none'; img-src data: https: http:; style-src 'unsafe-inline' https:; font-src data: https:"
+    : "default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:";
+  const base = `<meta http-equiv="Content-Security-Policy" content="${csp}"><meta name="referrer" content="no-referrer">
+    <style>body{font-family:${getComputedStyle(document.body).fontFamily};font-size:15px;line-height:1.6;color:#18202c;margin:1.2em 1.6em;overflow-wrap:anywhere}
+    img,video{max-width:100%!important;height:auto!important}pre{white-space:pre-wrap}table{width:auto!important;max-width:100%!important}td,th{width:auto!important;overflow-wrap:anywhere}a{color:#2f6fdf}</style>`;
+  frame.onload = () => {
+    const doc = frame.contentDocument;
+    if (!doc) return;
+    if (!external) {
+      // Feste Bildgrößen entfernen: gesperrte Bilder würden sonst als leere
+      // Kästen die Mail unnötig breit machen.
+      for (const img of doc.querySelectorAll("img")) { img.removeAttribute("width"); img.removeAttribute("height"); }
+    }
+    wireLinks(doc);
+    fitMail();
+  };
+  frame.srcdoc = msg.html ? base + msg.html : base + `<pre>${linkify(esc(msg.text || "(kein Inhalt)"))}</pre>`;
+}
+
+// Macht Webadressen in reinen Text-Mails anklickbar.
+function linkify(escaped) {
+  return escaped.replace(/\bhttps?:\/\/[^\s<>"]+[^\s<>".,;:!?)\]]/g, (u) => `<a href="${u}">${u}</a>`);
+}
+
+// Links öffnen im normalen Browser, nie in der App. Erlaubt sind nur
+// Webseiten (http/https) und E-Mail-Adressen (mailto). Beim Drüberfahren
+// zeigt die Leiste unten, wohin der Link wirklich führt.
+function wireLinks(doc) {
+  const status = document.querySelector("#read .linkstatus");
+  const target = (e) => e.target.closest?.("a[href]");
+  doc.addEventListener("click", (e) => {
+    const a = target(e);
+    if (!a) return;
+    e.preventDefault();
+    const href = a.getAttribute("href").trim();
+    if (/^(https?:|mailto:)/i.test(href)) {
+      invoke("open_link", { url: href }).catch((err) => toast("Link konnte nicht geöffnet werden: " + err, true));
+    } else if (!href.startsWith("#")) {
+      toast("Dieser Link wird aus Sicherheitsgründen nicht geöffnet.", true);
+    }
+  });
+  doc.addEventListener("mouseover", (e) => {
+    const a = target(e);
+    if (!status) return;
+    if (a) { status.textContent = a.getAttribute("href"); status.hidden = false; }
+    else status.hidden = true;
+  });
+  doc.addEventListener("mouseleave", () => { if (status) status.hidden = true; });
+  for (const f of doc.querySelectorAll("form")) f.addEventListener("submit", (e) => e.preventDefault());
 }
 
 // Mail immer auf die Breite des Lesebereichs einpassen: erst mit der

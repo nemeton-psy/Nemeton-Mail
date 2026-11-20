@@ -23,7 +23,8 @@ Ein- und Ausschalten oben in der Programmleiste („Testmodus: Einschalten / Aus
 - Ordnerleiste und Lesebereich mit der Maus breiter oder schmaler ziehen (Doppelklick auf den Rand setzt zurück)
 - Mails passen sich immer der Breite des Lesebereichs an, ohne seitliches Scrollen
 - Passt sich an große Monitore und kleine Bildschirme an
-- Mails werden geschützt angezeigt: keine Skripte, keine nachgeladenen Bilder aus dem Netz
+- Mails werden geschützt angezeigt: Skripte laufen nie; Bilder aus dem Netz sind gesperrt, bis man auf „Externe Inhalte anzeigen“ klickt
+- Links öffnen im normalen Browser (nur Webseiten und E-Mail-Adressen); beim Drüberfahren steht unten, wohin der Link führt
 
 ## Geplant
 
