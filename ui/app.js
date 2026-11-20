@@ -114,6 +114,7 @@ async function start() {
   applyTheme(load("theme") || "auto");
   applySize(load("scale") || "1");
   applyWidths();
+  invoke("app_version").then((v) => { $("ver").textContent = "Version " + v; }).catch(() => {});
   const acc = await invoke("get_account");
   if (!acc) return showSetup();
   setTestMode(acc.test_mode !== false);
@@ -431,7 +432,7 @@ function showMessage(msg) {
       <div class="meta"><div class="av"></div><div style="min-width:0"><b></b><span class="to"></span></div></div>
       <div class="atts"></div>
     </div>
-    <div class="read-body"><iframe sandbox="allow-same-origin" title="Inhalt der Nachricht"></iframe></div>`;
+    <div class="read-body"><iframe sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" title="Inhalt der Nachricht"></iframe></div>`;
   r.querySelector("h4").textContent = msg.subject || "(kein Betreff)";
   r.querySelector(".av").textContent = (msg.from || msg.from_addr || "?").trim()[0]?.toUpperCase() || "?";
   r.querySelector(".meta b").textContent = msg.from_addr && msg.from !== msg.from_addr ? `${msg.from} <${msg.from_addr}>` : msg.from;
@@ -475,6 +476,7 @@ function renderBody(msg, external) {
       // Kästen die Mail unnötig breit machen.
       for (const img of doc.querySelectorAll("img")) { img.removeAttribute("width"); img.removeAttribute("height"); }
     }
+    prepareLinks(doc);
     wireLinks(doc);
     fitMail();
   };
@@ -486,12 +488,33 @@ function linkify(escaped) {
   return escaped.replace(/\bhttps?:\/\/[^\s<>"]+[^\s<>".,;:!?)\]]/g, (u) => `<a href="${u}">${u}</a>`);
 }
 
+// Bereitet die Links vor, ohne dass in der Mail ein Skript laufen muss
+// (auf dem Mac laufen in der abgeschotteten Mail gar keine Skripte, auch
+// nicht unsere eigenen): Erlaubte Links öffnen "in neuem Fenster", das
+// fängt die App ab und gibt es an den Browser weiter. Alles andere
+// (z.B. javascript:- oder Datei-Links) wird unklickbar gemacht.
+function prepareLinks(doc) {
+  for (const a of doc.querySelectorAll("a[href], area[href]")) {
+    const href = a.getAttribute("href").trim();
+    if (/^(https?:|mailto:)/i.test(href)) {
+      a.setAttribute("target", "_blank");
+      a.setAttribute("rel", "noopener noreferrer");
+      if (!a.title) a.title = href;
+    } else if (!href.startsWith("#")) {
+      a.removeAttribute("href");
+      a.removeAttribute("target");
+    } else {
+      a.removeAttribute("target");
+    }
+  }
+}
+
 // Links öffnen im normalen Browser, nie in der App. Erlaubt sind nur
 // Webseiten (http/https) und E-Mail-Adressen (mailto). Beim Drüberfahren
 // zeigt die Leiste unten, wohin der Link wirklich führt.
 function wireLinks(doc) {
   const status = document.querySelector("#read .linkstatus");
-  const target = (e) => e.target.closest?.("a[href]");
+  const target = (e) => (e.target.nodeType === 1 ? e.target : e.target.parentElement)?.closest?.("a[href], area[href]");
   doc.addEventListener("click", (e) => {
     const a = target(e);
     if (!a) return;

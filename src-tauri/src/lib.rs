@@ -128,6 +128,10 @@ fn set_test_mode(app: tauri::AppHandle, on: bool) -> Result<(), String> {
 /// damit eine Mail keine Programme oder Dateien auf dem Computer starten kann.
 #[tauri::command]
 fn open_link(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    open_external(&app, &url)
+}
+
+fn open_external<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &str) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
     let u = url.trim();
     let lower = u.to_ascii_lowercase();
@@ -138,6 +142,20 @@ fn open_link(app: tauri::AppHandle, url: String) -> Result<(), String> {
         return Err("Ungültiger Link.".into());
     }
     app.opener().open_url(u, None::<&str>).map_err(|e| e.to_string())
+}
+
+/// Ist das eine Adresse der App selbst (statt einer Webseite aus dem Netz)?
+fn is_app_url(url: &tauri::Url) -> bool {
+    match url.scheme() {
+        "http" | "https" => matches!(url.host_str(), Some("localhost" | "tauri.localhost" | "ipc.localhost" | "127.0.0.1")),
+        "mailto" => false,
+        _ => true,
+    }
+}
+
+#[tauri::command]
+fn app_version(app: tauri::AppHandle) -> String {
+    app.package_info().version.to_string()
 }
 
 #[tauri::command]
@@ -204,12 +222,36 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(AppState::default())
+        .setup(|app| {
+            // Das Hauptfenster wird hier gebaut, damit Links aus Mails nie im
+            // App-Fenster landen: Will ein Link ein neues Fenster öffnen (so
+            // klappt das Anklicken auf dem Mac) oder das Fenster wegführen,
+            // geht er stattdessen an den normalen Browser.
+            let cfg = app.config().app.windows.iter().find(|w| w.label == "main").cloned().ok_or("Fenster fehlt")?;
+            let h1 = app.handle().clone();
+            let h2 = app.handle().clone();
+            tauri::WebviewWindowBuilder::from_config(app.handle(), &cfg)?
+                .on_new_window(move |url, _| {
+                    let _ = open_external(&h1, url.as_str());
+                    tauri::webview::NewWindowResponse::Deny
+                })
+                .on_navigation(move |url| {
+                    if is_app_url(url) {
+                        return true;
+                    }
+                    let _ = open_external(&h2, url.as_str());
+                    false
+                })
+                .build()?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_account,
             save_account,
             logout,
             set_test_mode,
             open_link,
+            app_version,
             list_folders,
             list_messages,
             get_message,

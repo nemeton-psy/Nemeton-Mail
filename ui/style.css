@@ -57,6 +57,7 @@ button:focus-visible, input:focus-visible, .mail:focus-visible, .folder:focus-vi
 #tm-off[data-confirm] { color: var(--danger); font-weight: 600; }
 .a-small { font-size: .8em; } .a-big { font-size: 1.25em; }
 #sz { width: 7rem; }
+.tb-ver { flex-shrink: 0; color: var(--muted); font-size: .92em; white-space: nowrap; }
 .tb-btn { margin-left: auto; flex-shrink: 0; border: 1px solid var(--line); background: var(--panel); border-radius: .4em; padding: .3em .8em; cursor: pointer; }
 
 .side { position: relative; background: var(--panel-2); border-right: 1px solid var(--line); padding: 1em .75em; display: flex; flex-direction: column; gap: .2em; min-height: 0; }
