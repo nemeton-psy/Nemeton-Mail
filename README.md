@@ -10,7 +10,7 @@ Auch Mails schreiben lässt sich gefahrlos ausprobieren: Im Testmodus geht jede 
 (mit „[Test]“ im Betreff und dem Hinweis, an wen sie eigentlich gegangen wäre).
 Ein- und Ausschalten oben in der Programmleiste („Testmodus: Einschalten / Ausschalten“, Ausschalten mit Bestätigung).
 
-## Was es schon kann (Version 0.2)
+## Was es schon kann (Version 0.3)
 
 - Mit dem eigenen Postfach verbinden (für Posteo voreingestellt). Das Passwort liegt im Schlüsselbund des Computers.
 - Ordner mit Anzahl ungelesener Mails
@@ -34,13 +34,15 @@ Ein- und Ausschalten oben in der Programmleiste („Testmodus: Einschalten / Aus
 - Anhänge per Knopf oder per Ziehen auf den Schreibbereich
 - Empfangene Anhänge stehen gut sichtbar über der Mail: Klick öffnet sie mit dem passenden Programm, „Sichern“ fragt, wohin die Datei gespeichert werden soll. Dateien, die Programme starten könnten (z.B. .exe), werden nicht geöffnet, sondern nur im Ordner gezeigt. Mails mit Anhang tragen in der Liste eine 📎
 - Einstellungen (⚙ oben): Mails öffnen sich rechts neben der Liste, über die ganze Fläche oder unten unter der Liste – für jedes Gerät einzeln
+- **Signatur** (⚙ Einstellungen): eine für alle Adressen oder je Absenderadresse eine eigene; steht automatisch unter neuen Mails und Antworten
+- **Werbung aussortieren** (⚙ Einstellungen): Newsletter und Werbung wandern aus dem Posteingang in den Ordner „Werbung“. Per Rechtsklick: „Absender ist Werbung“, „Alles von @firma ist Werbung“, „Absender nie aussortieren“. Absender, denen man geschrieben hat, bleiben immer im Posteingang
 - Suche zeigt beim Tippen sofort Treffer aus Absender und Betreff, die Suche im Mailtext auf dem Server folgt
 - Weitere Absenderadressen (Posteo-Aliasse) im Feld „Von“; beim Antworten wird automatisch die Adresse gewählt, an die die Mail ging
 - Gesendete Mails landen im Ordner „Gesendet“, beantwortete werden als beantwortet markiert
 
 ## Geplant
 
-Entwürfe speichern · Kalender mit dem Synology-NAS (CalDAV) · Filterregeln · überall dieselbe Schrift
+Entwürfe speichern · Kalender (evtl. als eigene App) mit dem Synology-NAS (CalDAV) · Filterregeln · überall dieselbe Schrift
 
 ## Installieren
 

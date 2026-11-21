@@ -290,3 +290,13 @@ body[data-view="bottom"] #split-read { display: block; top: auto; bottom: -4px; 
 .vd.bottom i:first-child { grid-row: span 2; }
 .set-note { margin: .8em 0 0; font-size: .8em; color: var(--muted); }
 @media (max-width: 640px) { .viewopts { grid-template-columns: minmax(0, 1fr); } }
+.settings { max-height: calc(100vh - 4rem); overflow: auto; }
+.set-block { border-top: 1px solid var(--line); margin-top: 1em; padding-top: 1em; }
+.set-sig { display: flex; align-items: center; gap: .5em; margin-bottom: .4em; }
+.set-small { font-size: .85em; color: var(--muted); }
+.set-sig select, .settings textarea { font: inherit; color: var(--fg); background: var(--panel-2); border: 1px solid var(--line); border-radius: .4em; padding: .3em .5em; }
+.settings textarea { width: 100%; resize: vertical; font-family: Verdana, Geneva, sans-serif; font-size: 13px; line-height: 1.5; }
+.set-check { display: flex; gap: .5em; align-items: flex-start; cursor: pointer; }
+.set-check input { margin-top: .2em; }
+.mail .adtag { display: inline-block; font-size: .72em; font-weight: 600; color: var(--muted); border: 1px solid var(--line-strong); border-radius: .3em; padding: 0 .35em; margin-right: .4em; vertical-align: .1em; }
+.c-edit .nm-sig { color: #555; }

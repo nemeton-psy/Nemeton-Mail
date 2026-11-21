@@ -274,6 +274,7 @@ async function reloadList() {
   try {
     S.list = applyLocal(await invoke("list_messages", { folder: S.folder, limit: 300 }));
     S.base = S.list.slice();
+    sortOutAds();
   } catch (err) {
     S.list = [];
     toast("Nachrichten konnten nicht geladen werden: " + err, true);
@@ -281,6 +282,61 @@ async function reloadList() {
   if (!find(S.sel)) S.sel = S.list[0] ? key(S.list[0]) : null;
   render();
 }
+
+/* ---------- Werbung aussortieren ---------- */
+function loadSet(k) { try { return new Set(JSON.parse(load(k) || "[]")); } catch { return new Set(); } }
+function saveSet(k, set) { store(k, JSON.stringify([...set])); }
+const domainOf = (a) => String(a || "").toLowerCase().split("@")[1] || "";
+function isAd(m) {
+  const addr = String(m.from_addr || "").toLowerCase();
+  if (!addr || loadSet("adKeep").has(addr)) return false;
+  if (typeof isMine === "function" && isMine(addr)) return false;
+  try { if (JSON.parse(load("addrbook") || "[]").some((x) => x.toLowerCase().includes("<" + addr + ">") || x.toLowerCase() === addr)) return false; } catch {}
+  return m.bulk || loadSet("adSenders").has(addr) || loadSet("adDomains").has(domainOf(addr));
+}
+const adsOn = () => load("adsOn") === "1";
+// Nach dem Laden des Posteingangs: Werbung in den Ordner „Werbung“.
+let adBusy = false;
+async function sortOutAds() {
+  const inbox = S.folders.find((f) => f.role === "inbox")?.id || "INBOX";
+  if (!adsOn() || S.folder !== inbox || S.testMode || adBusy) return;
+  const ads = S.list.filter(isAd);
+  if (!ads.length) return;
+  adBusy = true;
+  const keys = new Set(ads.map(key));
+  S.list = S.list.filter((m) => !keys.has(key(m)));
+  S.base = S.base.filter((m) => !keys.has(key(m)));
+  if (keys.has(S.sel)) S.sel = S.list[0] ? key(S.list[0]) : null;
+  if (keys.has(S.opened)) S.opened = null;
+  render();
+  try {
+    const n = await invoke("sort_ads", { folder: inbox, uids: ads.map((m) => m.uid) });
+    toast(n === 1 ? "1 Werbemail in den Ordner „Werbung“ verschoben." : `${n} Werbemails in den Ordner „Werbung“ verschoben.`);
+    await loadFolders();
+  } catch (err) {
+    toast("Werbung konnte nicht verschoben werden: " + err, true);
+    reloadList();
+  } finally { adBusy = false; }
+}
+function markSender(m, kind) {
+  const addr = String(m.from_addr || "").toLowerCase();
+  const keep = loadSet("adKeep"), senders = loadSet("adSenders"), domains = loadSet("adDomains");
+  if (kind === "keep") { keep.add(addr); senders.delete(addr); domains.delete(domainOf(addr)); toast(`${addr} wird nie aussortiert.`); }
+  else if (kind === "ad") { senders.add(addr); keep.delete(addr); toast(`${addr} gilt ab jetzt als Werbung.`); }
+  else if (kind === "domain") { domains.add(domainOf(addr)); keep.delete(addr); toast(`Alles von @${domainOf(addr)} gilt ab jetzt als Werbung.`); }
+  saveSet("adKeep", keep); saveSet("adSenders", senders); saveSet("adDomains", domains);
+  render();
+  if (kind !== "keep") sortOutAds();
+}
+$("ads-on").checked = adsOn();
+$("ads-on").onchange = (e) => {
+  store("adsOn", e.target.checked ? "1" : "0");
+  if (e.target.checked) {
+    if (S.testMode) toast("Werbung wird erkannt und markiert. Verschoben wird erst, wenn der Testmodus aus ist.");
+    sortOutAds();
+  }
+  render();
+};
 
 /* ---------- Suche ---------- */
 const isAllSearch = () => S.scope === "all" && S.query !== "";
@@ -402,6 +458,12 @@ function row(m, showFolder) {
   el.querySelector(".fold").textContent = folderName(m.folder);
   el.querySelector(".date").textContent = fmtDate(m.date);
   el.querySelector(".subj").textContent = m.subject || "(kein Betreff)";
+  const inboxId = S.folders.find((f) => f.role === "inbox")?.id || "INBOX";
+  if (adsOn() && m.folder === inboxId && isAd(m)) {
+    const t = document.createElement("span"); t.className = "adtag"; t.textContent = "Werbung";
+    t.title = S.testMode ? "Wird aussortiert, sobald der Testmodus aus ist" : "Wird in den Ordner „Werbung“ verschoben";
+    el.querySelector(".subj").prepend(t);
+  }
   if (m.has_att) {
     const a = document.createElement("span"); a.className = "clip"; a.textContent = "📎"; a.title = "Mit Anhang";
     el.querySelector(".subj").prepend(a);
@@ -824,6 +886,13 @@ function showMenu(x, y, k) {
   mv.addEventListener("mouseenter", openSub);
   mv.addEventListener("click", (e) => { e.stopPropagation(); openSub(); });
   mv.addEventListener("mouseleave", () => sub.classList.remove("show"));
+  const sepA = document.createElement("div"); sepA.className = "sep"; menu.appendChild(sepA);
+  if (m.from_addr) {
+    const dom = domainOf(m.from_addr);
+    menuItem(menu, "Absender ist Werbung", () => markSender(m, "ad"));
+    if (dom) menuItem(menu, `Alles von @${dom} ist Werbung`, () => markSender(m, "domain"));
+    menuItem(menu, "Absender nie aussortieren", () => markSender(m, "keep"));
+  }
   const sep2 = document.createElement("div"); sep2.className = "sep"; menu.appendChild(sep2);
   menuItem(menu, "Löschen", () => remove(k), { danger: true });
   menu.hidden = false;

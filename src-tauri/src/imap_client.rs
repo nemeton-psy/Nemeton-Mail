@@ -46,6 +46,8 @@ pub struct Summary {
     pub flagged: bool,
     /// Hat (sehr wahrscheinlich) einen Anhang.
     pub has_att: bool,
+    /// Massenmail (Newsletter, Werbung): hat eine Abmelde-Zeile o.ä.
+    pub bulk: bool,
 }
 
 #[derive(Serialize)]
@@ -216,6 +218,12 @@ impl MailClient {
                     .get_first_value("Content-Type")
                     .map(|c| c.trim().to_ascii_lowercase().starts_with("multipart/mixed"))
                     .unwrap_or(false),
+                bulk: headers.get_first_header("List-Unsubscribe").is_some()
+                    || headers.get_first_header("List-Id").is_some()
+                    || headers
+                        .get_first_value("Precedence")
+                        .map(|p| matches!(p.trim().to_ascii_lowercase().as_str(), "bulk" | "list" | "junk"))
+                        .unwrap_or(false),
             });
         }
         out.sort_by(|a, b| b.date.cmp(&a.date));
@@ -283,6 +291,29 @@ impl MailClient {
         self.session.append_with_flags(folder, raw, &[Flag::Seen]).map_err(err)?;
         self.selected = None;
         Ok(())
+    }
+
+    /// Verschiebt mehrere Mails auf einmal in einen Ordner. Gibt es den
+    /// Ordner noch nicht, wird er angelegt.
+    pub fn move_many(&mut self, folder: &str, uids: &[u32], target: &str) -> Result<usize, String> {
+        if self.read_only {
+            return Err(READ_ONLY_MSG.into());
+        }
+        if uids.is_empty() {
+            return Ok(0);
+        }
+        if !self.list_folders()?.iter().any(|f| f.id == target) {
+            self.session.create(target).map_err(err)?;
+            let _ = self.session.subscribe(target);
+        }
+        self.select(folder)?;
+        let set = uids.iter().map(|u| u.to_string()).collect::<Vec<_>>().join(",");
+        if self.session.uid_mv(&set, target).is_err() {
+            self.session.uid_copy(&set, target).map_err(err)?;
+            self.session.uid_store(&set, "+FLAGS.SILENT (\\Deleted)").map_err(err)?;
+            self.session.uid_expunge(&set).map_err(err)?;
+        }
+        Ok(uids.len())
     }
 
     /// Markiert die Mail als „beantwortet“.

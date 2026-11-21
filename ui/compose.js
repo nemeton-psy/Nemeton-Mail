@@ -26,6 +26,31 @@ function myAddresses() {
 }
 const isMine = (addr) => myAddresses().includes(String(addr || "").toLowerCase());
 
+/* ---------- Signatur ---------- */
+function sigFor(addr) {
+  const own = load("sig:" + String(addr || "").toLowerCase());
+  return (own && own.trim() ? own : load("sig:*") || "").trim();
+}
+function sigHtml(addr) {
+  const t = sigFor(addr);
+  return t ? textToHtml(t) : "";
+}
+// Einstellungen: Signatur je Absenderadresse oder für alle.
+function fillSigUI() {
+  if (!S.acc) return;
+  const sel = $("sig-for"), ta = $("sig-text");
+  const cur = sel.value || "*";
+  sel.innerHTML = "";
+  const add = (v, label) => { const o = document.createElement("option"); o.value = v; o.textContent = label; sel.appendChild(o); };
+  add("*", "alle Adressen");
+  for (const a of [S.acc.email, ...(S.acc.aliases || [])]) add(a.toLowerCase(), a);
+  sel.value = [...sel.options].some((o) => o.value === cur) ? cur : "*";
+  ta.value = load("sig:" + sel.value) || "";
+  sel.onchange = () => { ta.value = load("sig:" + sel.value) || ""; };
+  ta.oninput = () => store("sig:" + sel.value, ta.value);
+}
+$("btn-settings").addEventListener("click", fillSigUI);
+
 /* ---------- Adressbuch (Vorschläge beim Tippen) ---------- */
 function knownAddresses() {
   let saved = [];
@@ -305,9 +330,19 @@ function openCompose(kind, msg) {
   }
   const more = document.createElement("option"); more.value = "+"; more.textContent = "Weitere Absenderadresse hinzufügen …"; sel.appendChild(more);
   sel.value = from;
+  const ed0 = $("c-edit");
+  const setSig = () => {
+    ed0.querySelector(".nm-sig")?.remove();
+    const h = sigHtml(from);
+    if (h) {
+      if (!ed0.firstChild) ed0.innerHTML = "<div><br></div>";
+      const d = document.createElement("div"); d.className = "nm-sig"; d.innerHTML = "<br>" + h; ed0.appendChild(d);
+    }
+  };
+  setSig();
   sel.onchange = () => {
     if (sel.value === "+") { $("c-alias").hidden = false; $("c-alias-in").focus(); sel.value = from; }
-    else { from = sel.value; store("lastFrom", from); }
+    else { from = sel.value; store("lastFrom", from); setSig(); }
   };
   $("c-alias-ok").onclick = async () => {
     const v = $("c-alias-in").value.trim().toLowerCase();
@@ -381,7 +416,14 @@ function openCompose(kind, msg) {
 
   if (!S.acc.name) $("c-name").focus();
   else if (!to.length) document.querySelector('#compose .addrs[data-field="to"] input').focus();
-  else { ed.focus(); }
+  else focusStart(ed);
+}
+// Schreibmarke an den Anfang (über die Signatur).
+function focusStart(ed) {
+  ed.focus();
+  const r = document.createRange();
+  r.setStart(ed.firstChild || ed, 0); r.collapse(true);
+  const s = getSelection(); s.removeAllRanges(); s.addRange(r);
 }
 
 function showQuote(msg, kind) {

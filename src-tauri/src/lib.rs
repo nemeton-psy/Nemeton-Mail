@@ -455,6 +455,12 @@ async fn move_message(app: tauri::AppHandle, folder: String, uid: u32, target: S
     blocking(app, move |c| c.move_to(&folder, uid, &target)).await
 }
 
+/// Verschiebt erkannte Werbung aus dem Posteingang in den Ordner „Werbung“.
+#[tauri::command]
+async fn sort_ads(app: tauri::AppHandle, folder: String, uids: Vec<u32>) -> Result<usize, String> {
+    blocking(app, move |c| c.move_many(&folder, &uids, "Werbung")).await
+}
+
 #[tauri::command]
 async fn search(app: tauri::AppHandle, query: String, folder: Option<String>) -> Result<Vec<Summary>, String> {
     blocking(app, move |c| c.search(&query, folder.as_deref())).await
@@ -506,7 +512,8 @@ pub fn run() {
             set_seen,
             delete_message,
             move_message,
-            search
+            search,
+            sort_ads
         ])
         .run(tauri::generate_context!())
         .expect("Nemeton Mail konnte nicht starten");

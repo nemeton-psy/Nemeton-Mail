@@ -98,6 +98,20 @@
         <button type="button" data-view="bottom"><span class="vd bottom"><i></i><i></i><i class="r"></i></span><b>Unten unter der Liste</b><small>Liste oben, Mail darunter. Die Grenze lässt sich verschieben.</small></button>
       </div>
       <p class="set-note">Diese Einstellung gilt nur für dieses Gerät. So kannst du am großen Bildschirm und am Surface verschiedene Ansichten nutzen.</p>
+      <div class="set-block">
+        <div class="set-label">Signatur</div>
+        <div class="set-sig">
+          <label class="set-small" for="sig-for">Für</label>
+          <select id="sig-for"></select>
+        </div>
+        <textarea id="sig-text" rows="4" placeholder="z.B.&#10;Viele Grüße&#10;Patrick"></textarea>
+        <p class="set-note">Steht automatisch unter jeder neuen Mail und jeder Antwort, in deiner Schrift. Für jede Absenderadresse kannst du eine eigene Signatur festlegen; sonst gilt die für „alle Adressen“.</p>
+      </div>
+      <div class="set-block">
+        <div class="set-label">Werbung</div>
+        <label class="set-check"><input type="checkbox" id="ads-on"> Werbung und Newsletter im Posteingang automatisch in den Ordner „Werbung“ verschieben</label>
+        <p class="set-note">Erkannt wird Werbung an der Abmelde-Zeile, die solche Mails mitschicken, und an Absendern, die du per Rechtsklick als Werbung markierst. Absender, denen du schon geschrieben hast, werden nie aussortiert. Mit Rechtsklick → „Absender nie aussortieren“ nimmst du jemanden dauerhaft aus. Im Testmodus wird nichts verschoben, Werbung ist dann nur in der Liste markiert.</p>
+      </div>
     </div>
 
     <div class="toast" id="toast" hidden></div>
