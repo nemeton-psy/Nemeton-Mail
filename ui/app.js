@@ -10,6 +10,7 @@ const S = {
   folders: [],
   folder: "INBOX",
   list: [],          // aktuell angezeigte Mails
+  cat: null,         // Kategorie-Filter (null = alle)
   base: [],          // alle geladenen Mails des Ordners (für die Sofortsuche)
   sel: null,         // Schlüssel der ausgewählten Mail ("ordner|uid")
   opened: null,      // Schlüssel der geöffneten Mail
@@ -426,16 +427,20 @@ function render() {
     : f ? `${f.unseen} ungelesen · ${f.total} Nachrichten` : "";
   $("col-who").textContent = all ? "Von / An" : isSentFolder(S.folder) ? "An" : "Von";
 
+  renderCatBar();
+  const shown = viewList();
   if (S.searching && !S.list.length) {
     box.innerHTML = `<div class="empty">Suche läuft …</div>`;
   } else {
-    if (!S.list.length) {
+    if (!shown.length) {
       const e = document.createElement("div");
       e.className = "empty";
-      e.textContent = S.query ? (S.scope === "all" ? "Nichts gefunden." : "Nichts gefunden. Versuch es mit „Alle Ordner“.") : "Dieser Ordner ist leer.";
+      e.textContent = S.list.length && S.cat
+        ? (S.cat === "none" ? "Alle Mails hier haben eine Kategorie." : `Keine Mails in „${catById(S.cat)?.name || ""}“. Ordne Absender per Rechtsklick → „Kategorie“ zu oder zieh eine Mail auf die Kategorie oben.`)
+        : S.query ? (S.scope === "all" ? "Nichts gefunden." : "Nichts gefunden. Versuch es mit „Alle Ordner“.") : "Dieser Ordner ist leer.";
       box.appendChild(e);
     }
-    for (const m of S.list) box.appendChild(row(m, all));
+    for (const m of shown) box.appendChild(row(m, all));
   }
   $("main").classList.toggle("open", S.opened !== null);
   $("main").classList.toggle("wide", S.opened === null || S.view === "bottom");
@@ -464,6 +469,8 @@ function row(m, showFolder) {
     t.title = S.testMode ? "Wird aussortiert, sobald der Testmodus aus ist" : "Wird in den Ordner „Werbung“ verschoben";
     el.querySelector(".subj").prepend(t);
   }
+  const ct = catTags(m);
+  if (ct) el.querySelector(".subj").prepend(ct);
   if (m.has_att) {
     const a = document.createElement("span"); a.className = "clip"; a.textContent = "📎"; a.title = "Mit Anhang";
     el.querySelector(".subj").prepend(a);
@@ -579,6 +586,7 @@ function showMessage(msg) {
       </div>
       <h4></h4>
       <div class="meta"><div class="av"></div><div style="min-width:0"><b></b><span class="to"></span></div></div>
+      <div class="msgcats"></div>
       <div class="atts"></div>
     </div>
     <div class="read-body"><iframe sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" title="Inhalt der Nachricht"></iframe></div>`;
@@ -588,6 +596,7 @@ function showMessage(msg) {
   r.querySelector(".to").textContent = `an ${msg.to}${msg.cc ? ", Kopie: " + msg.cc : ""} · ${fmtLong(msg.date)}`;
   const atts = r.querySelector(".atts");
   renderAttachments(atts, msg);
+  renderMsgCats(msg);
   // Externe Inhalte (Bilder, Schriften aus dem Netz) sind zuerst gesperrt:
   // Beim Laden würde der Absender erfahren, dass und wann du die Mail liest.
   const hasExternal = !!msg.html && /(src|background|srcset)\s*=\s*["']?\s*(https?:)?\/\/|url\(\s*["']?\s*(https?:)?\/\//i.test(msg.html);
@@ -863,6 +872,7 @@ function showMenu(x, y, k) {
   menu.innerHTML = "";
   menuItem(menu, "Öffnen", () => openMail(k));
   menuItem(menu, m.seen ? "Als ungelesen markieren" : "Als gelesen markieren", () => toggleSeen(m));
+  addCatSubmenu(m);
   const sepR = document.createElement("div"); sepR.className = "sep"; menu.appendChild(sepR);
   menuItem(menu, "Antworten", () => composeFor(k, "reply"));
   menuItem(menu, "Allen antworten", () => composeFor(k, "all"));
@@ -917,9 +927,10 @@ $("mails").addEventListener("wheel", (e) => {
 /* ---------- Tastatur ---------- */
 $("mails").addEventListener("keydown", (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
-  const i = S.list.findIndex((m) => key(m) === S.sel);
+  const vl = viewList();
+  const i = vl.findIndex((m) => key(m) === S.sel);
   const move = (d) => {
-    const n = S.list[Math.min(Math.max(i + d, 0), S.list.length - 1)];
+    const n = vl[Math.min(Math.max(i + d, 0), vl.length - 1)];
     if (!n) return;
     S.sel = key(n);
     if (S.opened !== null) openMail(S.sel); else render();
@@ -971,4 +982,4 @@ setInterval(() => {
   reloadList();
 }, 120000);
 
-start().catch((err) => showSetup(String(err)));
+// Start: siehe Ende von categories.js (wird als letzte Datei geladen).

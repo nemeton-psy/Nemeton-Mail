@@ -79,6 +79,7 @@
               </div>
             </div>
           </div>
+          <div class="catbar" id="catbar" role="toolbar" aria-label="Nach Kategorie filtern"></div>
           <div class="cols" id="cols" aria-hidden="true">
             <span id="col-who">Von</span><span>Ordner</span><span>Betreff</span><span class="c-date">Datum</span>
           </div>
@@ -99,6 +100,11 @@
       </div>
       <p class="set-note">Diese Einstellung gilt nur für dieses Gerät. So kannst du am großen Bildschirm und am Surface verschiedene Ansichten nutzen.</p>
       <div class="set-block">
+        <div class="set-label">Kategorien <span class="set-small">(Testversion)</span></div>
+        <div id="cat-settings"></div>
+        <p class="set-note">Neue Kategorien legst du über „+ Kategorie“ über der Mailliste an. Absender ordnest du per Rechtsklick → „Kategorie“ zu oder indem du eine Mail auf eine Kategorie ziehst. Auf dem Server ändert sich dabei nichts.</p>
+      </div>
+      <div class="set-block">
         <div class="set-label">Signatur</div>
         <div class="set-sig">
           <label class="set-small" for="sig-for">Für</label>
@@ -118,5 +124,6 @@
   </div>
   <script src="app.js"></script>
   <script src="compose.js"></script>
+  <script src="categories.js"></script>
 </body>
 </html>
