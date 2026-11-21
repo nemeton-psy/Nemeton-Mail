@@ -585,7 +585,7 @@ function renderAttachments(box, msg) {
     open.querySelector(".att-name").textContent = name;
     open.querySelector(".att-size").textContent = fmtBytes(msg.att_sizes?.[index]);
     const save = document.createElement("button");
-    save.type = "button"; save.className = "att-save"; save.textContent = "Sichern"; save.title = "In „Downloads“ speichern";
+    save.type = "button"; save.className = "att-save"; save.textContent = "Sichern"; save.title = "Speichern unter …";
     const run = async (cmd, btn) => {
       btn.disabled = true;
       try {

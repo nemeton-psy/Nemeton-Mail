@@ -32,7 +32,7 @@ Ein- und Ausschalten oben in der Programmleiste („Testmodus: Einschalten / Aus
 - Adressen in **An**, **Kopie** und **Blindkopie** als Kästchen: mit der Maus zwischen den Feldern verschieben, Doppelklick zum Ändern, × zum Entfernen
 - **Deine Schrift** (Verdana, Arial, Tahoma, Trebuchet MS, Georgia oder Times New Roman – alle auf Mac, Windows und iPhone vorhanden) wird fest in die Mail geschrieben. Eingefügter Text verliert fremde Schriften. Wenn dich jemand zitiert, wird dein Text beim Lesen wieder in deiner Schrift gezeigt
 - Anhänge per Knopf oder per Ziehen auf den Schreibbereich
-- Empfangene Anhänge stehen gut sichtbar über der Mail: Klick öffnet sie mit dem passenden Programm, „Sichern“ legt sie in „Downloads“. Dateien, die Programme starten könnten (z.B. .exe), werden nicht geöffnet, sondern nur im Ordner gezeigt. Mails mit Anhang tragen in der Liste eine 📎
+- Empfangene Anhänge stehen gut sichtbar über der Mail: Klick öffnet sie mit dem passenden Programm, „Sichern“ fragt, wohin die Datei gespeichert werden soll. Dateien, die Programme starten könnten (z.B. .exe), werden nicht geöffnet, sondern nur im Ordner gezeigt. Mails mit Anhang tragen in der Liste eine 📎
 - Einstellungen (⚙ oben): Mails öffnen sich rechts neben der Liste, über die ganze Fläche oder unten unter der Liste – für jedes Gerät einzeln
 - Suche zeigt beim Tippen sofort Treffer aus Absender und Betreff, die Suche im Mailtext auf dem Server folgt
 - Weitere Absenderadressen (Posteo-Aliasse) im Feld „Von“; beim Antworten wird automatisch die Adresse gewählt, an die die Mail ging

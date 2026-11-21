@@ -20,6 +20,8 @@ const KEYRING_SERVICE: &str = "nemeton-mail";
 #[derive(Default)]
 struct AppState {
     client: Mutex<Option<MailClient>>,
+    /// Zuletzt gewählter Ordner beim Sichern von Anhängen.
+    save_dir: Mutex<Option<PathBuf>>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -364,16 +366,34 @@ async fn open_attachment(app: tauri::AppHandle, folder: String, uid: u32, index:
     Ok(String::new())
 }
 
-/// Speichert einen Anhang im Ordner „Downloads“ und zeigt ihn dort.
+/// Speichert einen Anhang. Ein Fenster fragt, wo er hin soll (beim ersten
+/// Mal ist „Downloads“ vorgeschlagen, danach der zuletzt gewählte Ordner).
 #[tauri::command]
 async fn save_attachment(app: tauri::AppHandle, folder: String, uid: u32, index: usize) -> Result<String, String> {
+    use tauri_plugin_dialog::DialogExt;
     use tauri_plugin_opener::OpenerExt;
     let a = blocking(app.clone(), move |c| c.attachment(&folder, uid, index)).await?;
-    let dir = app.path().download_dir().map_err(|_| "Der Ordner „Downloads“ wurde nicht gefunden.")?;
-    let path = free_path(&dir, &safe_name(&a.name));
+    let name = safe_name(&a.name);
+    let start = app.state::<AppState>().save_dir.lock().ok().and_then(|d| d.clone()).or_else(|| app.path().download_dir().ok());
+    let app2 = app.clone();
+    let chosen = tauri::async_runtime::spawn_blocking(move || {
+        let mut d = app2.dialog().file().set_title("Anhang sichern").set_file_name(&name);
+        if let Some(dir) = start {
+            d = d.set_directory(dir);
+        }
+        d.blocking_save_file()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let Some(path) = chosen.and_then(|p| p.as_path().map(|p| p.to_path_buf())) else {
+        return Ok(String::new()); // abgebrochen
+    };
     std::fs::write(&path, &a.data).map_err(|e| format!("Speichern fehlgeschlagen: {e}"))?;
+    if let Some(dir) = path.parent() {
+        *app.state::<AppState>().save_dir.lock().unwrap() = Some(dir.to_path_buf());
+    }
     let _ = app.opener().reveal_item_in_dir(&path);
-    Ok(format!("Gespeichert in Downloads: {}", path.file_name().unwrap_or_default().to_string_lossy()))
+    Ok(format!("Gespeichert: {}", path.file_name().unwrap_or_default().to_string_lossy()))
 }
 
 #[tauri::command]
@@ -444,6 +464,7 @@ async fn search(app: tauri::AppHandle, query: String, folder: Option<String>) ->
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
         .setup(|app| {
             // Das Hauptfenster wird hier gebaut, damit Links aus Mails nie im
