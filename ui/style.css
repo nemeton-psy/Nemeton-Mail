@@ -86,6 +86,7 @@ button:focus-visible, input:focus-visible, .mail:focus-visible, .folder:focus-vi
 .split:hover, .split.drag { background: color-mix(in srgb, var(--accent) 35%, transparent); }
 .main:not(.open) #split-read { display: none; }
 body.dragging { cursor: col-resize; user-select: none; }
+body[data-view="bottom"].dragging { cursor: row-resize; }
 body.dragging iframe { pointer-events: none; }
 .main.open .list { border-right: 1px solid var(--line); }
 /* Zeile 2: Ordnerkopf, klar abgesetzt von der scrollbaren Liste */
@@ -141,15 +142,15 @@ body.dragging iframe { pointer-events: none; }
 
 /* Breite Übersicht ohne Lesebereich: Spalten Von/An | Ordner | Betreff | Datum */
 @media (min-width: 1000px) {
-  .main:not(.open) .cols { display: grid; grid-template-columns: 16rem 10rem minmax(0, 1fr) 9rem; gap: .3em .8em; padding: .55em 1.2em .55em 1.9em; background: var(--panel-2); }
-  .main:not(.open) .cols span { font-size: .75em; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
-  .main:not(.open) .cols .c-date { text-align: right; }
-  .main:not(.open) .mail { grid-template-columns: 16rem 10rem minmax(0, 1fr) 9rem; grid-template-areas: "who fold subj date"; padding-block: .85em; }
-  .main:not(.open) .mail .fold { display: block; }
-  .main:not(.open) .mail .subj .tag { display: none; }
-  .main:not(.open) .mail.unread::after { top: 50%; transform: translateY(-50%); }
-  .main:not(.open) .list > .mails { border-top-width: 1px; }
-  .main:not(.open) .cols { border-top: 3px solid var(--line-strong); }
+  .main.wide .cols { display: grid; grid-template-columns: 16rem 10rem minmax(0, 1fr) 9rem; gap: .3em .8em; padding: .55em 1.2em .55em 1.9em; background: var(--panel-2); }
+  .main.wide .cols span { font-size: .75em; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
+  .main.wide .cols .c-date { text-align: right; }
+  .main.wide .mail { grid-template-columns: 16rem 10rem minmax(0, 1fr) 9rem; grid-template-areas: "who fold subj date"; padding-block: .85em; }
+  .main.wide .mail .fold { display: block; }
+  .main.wide .mail .subj .tag { display: none; }
+  .main.wide .mail.unread::after { top: 50%; transform: translateY(-50%); }
+  .main.wide .list > .mails { border-top-width: 1px; }
+  .main.wide .cols { border-top: 3px solid var(--line-strong); }
 }
 
 /* Lesebereich */
@@ -164,8 +165,21 @@ body.dragging iframe { pointer-events: none; }
 .meta b { color: var(--fg); display: block; }
 .meta .to { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .av { width: 2.4em; height: 2.4em; border-radius: 50%; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; font-weight: 700; flex: none; }
-.atts { display: flex; flex-wrap: wrap; gap: .4em; margin-top: .8em; }
-.atts span { font-size: .8em; border: 1px solid var(--line); border-radius: .4em; padding: .2em .6em; color: var(--muted); }
+.atts { margin-top: .9em; padding: .6em .7em .7em; border: 2px solid var(--accent); border-radius: .6em; background: var(--accent-soft); }
+.atts[hidden] { display: none; }
+.atts-head { font-weight: 700; font-size: .9em; color: var(--accent); margin-bottom: .45em; }
+.atts-list { display: flex; flex-wrap: wrap; gap: .5em; }
+.attcard { display: flex; align-items: stretch; max-width: 100%; border: 1px solid var(--line-strong); border-radius: .5em; background: var(--panel); overflow: hidden; }
+.attcard button { font: inherit; color: var(--fg); background: transparent; border: 0; cursor: pointer; }
+.attcard button:hover { background: var(--sel); }
+.attcard button:disabled { opacity: .5; cursor: progress; }
+.att-open { display: flex; align-items: center; gap: .55em; padding: .45em .8em; min-width: 0; text-align: left; }
+.att-ic { font-size: 1.5em; line-height: 1; }
+.att-txt { display: flex; flex-direction: column; min-width: 0; }
+.att-name { font-weight: 600; font-size: .9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 22em; }
+.att-size { font-size: .75em; color: var(--muted); }
+.att-save { border-left: 1px solid var(--line) !important; padding: 0 .8em; font-size: .82em !important; color: var(--accent) !important; font-weight: 600; }
+.mail .clip { margin-right: .35em; }
 .read-body { position: relative; flex: 1; min-height: 0; background: #fff; }
 .extbar { display: flex; flex-wrap: wrap; align-items: center; gap: .4em 1em; padding: .55em 1.6em; font-size: .85em;
   background: var(--warn-bg); border-bottom: 1px solid var(--warn-line); }
@@ -245,3 +259,34 @@ body.dragging iframe { pointer-events: none; }
   .body { grid-template-columns: minmax(0, 1fr); }
   .side { display: none; }
 }
+
+/* Wo sich Mails öffnen (Einstellungen): rechts (Standard), groß, unten */
+body[data-view="full"] .main.open { grid-template-columns: minmax(0, 1fr); }
+body[data-view="full"] .main.open .list { display: none; }
+body[data-view="bottom"] .main.open { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(9rem, min(var(--list-h, 42%), calc(100% - 14rem))) minmax(0, 1fr); }
+body[data-view="bottom"] .main.open .list { display: flex; border-right: 0; border-bottom: 1px solid var(--line-strong); }
+body[data-view="bottom"] .main.open .listhead { flex-direction: row; flex-wrap: wrap; align-items: center; gap: .4em 1.2em; padding-block: .6em; }
+body[data-view="bottom"] .main.open .listhead h3 { font-size: 1.2em; }
+body[data-view="bottom"] #split-read { display: block; top: auto; bottom: -4px; left: 0; right: 0; width: auto; height: 8px; cursor: row-resize; }
+
+/* Einstellungen */
+.tb-btn + .tb-btn { margin-left: 0; }
+.settings { position: fixed; top: 2.6rem; right: 1rem; z-index: 30; width: min(34rem, calc(100vw - 2rem)); background: var(--panel); color: var(--fg);
+  border: 1px solid var(--line-strong); border-radius: .8em; box-shadow: 0 12px 40px rgb(0 0 0 / .22); padding: 1em 1.2em 1.1em; font-size: 14px; }
+.settings[hidden] { display: none; }
+.settings h4 { margin: 0 0 .8em; font-size: 1.1em; }
+.set-label { font-weight: 600; margin-bottom: .5em; }
+.viewopts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .6em; }
+.viewopts button { font: inherit; color: var(--fg); background: var(--panel-2); border: 2px solid var(--line); border-radius: .6em; padding: .6em; cursor: pointer; text-align: left; display: flex; flex-direction: column; gap: .45em; }
+.viewopts button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.viewopts b { font-size: .92em; }
+.viewopts small { color: var(--muted); font-size: .8em; line-height: 1.3; }
+.vd { display: grid; gap: 3px; height: 3.2em; padding: 3px; border: 1px solid var(--line-strong); border-radius: .3em; background: var(--panel); }
+.vd i { display: block; border-radius: 2px; background: var(--line-strong); }
+.vd i.r { background: var(--accent); }
+.vd.right { grid-template-columns: 1fr 2fr 3fr; }
+.vd.full { grid-template-columns: 1fr 5fr; }
+.vd.bottom { grid-template-columns: 1fr 5fr; grid-template-rows: 1fr 1.4fr; }
+.vd.bottom i:first-child { grid-row: span 2; }
+.set-note { margin: .8em 0 0; font-size: .8em; color: var(--muted); }
+@media (max-width: 640px) { .viewopts { grid-template-columns: minmax(0, 1fr); } }

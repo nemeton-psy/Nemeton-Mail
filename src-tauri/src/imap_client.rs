@@ -44,6 +44,8 @@ pub struct Summary {
     pub date: i64,
     pub seen: bool,
     pub flagged: bool,
+    /// Hat (sehr wahrscheinlich) einen Anhang.
+    pub has_att: bool,
 }
 
 #[derive(Serialize)]
@@ -59,6 +61,8 @@ pub struct FullMessage {
     pub html: Option<String>,
     pub text: Option<String>,
     pub attachments: Vec<String>,
+    /// Größe der Anhänge in Bytes (gleiche Reihenfolge).
+    pub att_sizes: Vec<usize>,
     /// Für Antworten: Kennung der Mail und bisheriger Gesprächsverlauf.
     pub message_id: String,
     pub references: String,
@@ -208,6 +212,10 @@ impl MailClient {
                 date,
                 seen: f.flags().iter().any(|x| matches!(x, Flag::Seen)),
                 flagged: f.flags().iter().any(|x| matches!(x, Flag::Flagged)),
+                has_att: headers
+                    .get_first_value("Content-Type")
+                    .map(|c| c.trim().to_ascii_lowercase().starts_with("multipart/mixed"))
+                    .unwrap_or(false),
             });
         }
         out.sort_by(|a, b| b.date.cmp(&a.date));
@@ -237,6 +245,7 @@ impl MailClient {
             html: None,
             text: None,
             attachments: vec![],
+            att_sizes: vec![],
             message_id: h.get_first_value("Message-ID").unwrap_or_default().trim().to_string(),
             references: h.get_first_value("References").unwrap_or_default().split_whitespace().collect::<Vec<_>>().join(" "),
             from_list: header_addrs(h, "From"),
@@ -259,6 +268,11 @@ impl MailClient {
         let mut out = Vec::new();
         collect_attachments(&parsed, &mut out);
         Ok(out)
+    }
+
+    /// Holt einen einzelnen Anhang (Nummer wie in `FullMessage::attachments`).
+    pub fn attachment(&mut self, folder: &str, uid: u32, index: usize) -> Result<AttachmentData, String> {
+        self.attachments(folder, uid)?.into_iter().nth(index).ok_or_else(|| "Anhang nicht gefunden.".to_string())
     }
 
     /// Legt eine fertige Mail in einem Ordner ab (z.B. Kopie in „Gesendet“).
@@ -499,13 +513,11 @@ fn collect_attachments(p: &ParsedMail, out: &mut Vec<AttachmentData>) {
     let filename = disp.params.get("filename").cloned().or_else(|| p.ctype.params.get("name").cloned());
     let is_attachment = matches!(disp.disposition, mailparse::DispositionType::Attachment) || filename.is_some();
     if is_attachment {
-        if let Ok(data) = p.get_body_raw() {
-            out.push(AttachmentData {
-                name: filename.unwrap_or_else(|| "Anhang".into()),
-                mime: p.ctype.mimetype.clone(),
-                data,
-            });
-        }
+        out.push(AttachmentData {
+            name: filename.unwrap_or_else(|| "Anhang".into()),
+            mime: p.ctype.mimetype.clone(),
+            data: p.get_body_raw().unwrap_or_default(),
+        });
     }
 }
 
@@ -522,6 +534,7 @@ fn collect_parts(p: &ParsedMail, msg: &mut FullMessage) {
     let mime = p.ctype.mimetype.to_ascii_lowercase();
     if is_attachment {
         msg.attachments.push(filename.unwrap_or_else(|| "Anhang".into()));
+        msg.att_sizes.push(p.get_body_raw().map(|b| b.len()).unwrap_or(0));
     } else if mime == "text/html" && msg.html.is_none() {
         msg.html = p.get_body().ok();
     } else if mime == "text/plain" && msg.text.is_none() {

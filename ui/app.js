@@ -10,6 +10,7 @@ const S = {
   folders: [],
   folder: "INBOX",
   list: [],          // aktuell angezeigte Mails
+  base: [],          // alle geladenen Mails des Ordners (für die Sofortsuche)
   sel: null,         // Schlüssel der ausgewählten Mail ("ordner|uid")
   opened: null,      // Schlüssel der geöffneten Mail
   scope: "folder",   // Suche: "folder" oder "all"
@@ -80,7 +81,7 @@ function dragSplit(handle, onMove, onEnd) {
     handle.setPointerCapture(e.pointerId);
     handle.classList.add("drag");
     document.body.classList.add("dragging");
-    const move = (ev) => onMove(ev.clientX);
+    const move = (ev) => onMove(ev.clientX, ev.clientY);
     const up = () => {
       handle.removeEventListener("pointermove", move);
       handle.classList.remove("drag");
@@ -100,20 +101,56 @@ dragSplit($("split-side"), (x) => {
   sideW = Math.round(clamp(x - left, 150, 480));
   document.body.style.setProperty("--side-w", sideW + "px");
 }, () => sideW && store("sideW", sideW));
-dragSplit($("split-read"), (x) => {
+let listH = 0;
+dragSplit($("split-read"), (x, y) => {
   const r = $("main").getBoundingClientRect();
-  listW = Math.round(clamp(x - r.left, 260, r.width - 420));
-  document.body.style.setProperty("--list-w", listW + "px");
+  if (S.view === "bottom") {
+    listH = Math.round(clamp(y - r.top, 140, r.height - 200));
+    document.body.style.setProperty("--list-h", listH + "px");
+  } else {
+    listW = Math.round(clamp(x - r.left, 260, r.width - 420));
+    document.body.style.setProperty("--list-w", listW + "px");
+  }
   fitMail();
-}, () => listW && store("listW", listW));
+}, () => { if (S.view === "bottom") { if (listH) store("listH", listH); } else if (listW) store("listW", listW); });
 $("split-side").ondblclick = () => { document.body.style.removeProperty("--side-w"); store("sideW", ""); };
-$("split-read").ondblclick = () => { document.body.style.removeProperty("--list-w"); store("listW", ""); fitMail(); };
+$("split-read").ondblclick = () => {
+  if (S.view === "bottom") { document.body.style.removeProperty("--list-h"); store("listH", ""); }
+  else { document.body.style.removeProperty("--list-w"); store("listW", ""); }
+  fitMail();
+};
+
+/* ---------- Einstellungen: wo sich Mails öffnen ---------- */
+function applyView(v) {
+  S.view = ["right", "full", "bottom"].includes(v) ? v : "right";
+  document.body.dataset.view = S.view;
+  store("view", S.view);
+  for (const b of document.querySelectorAll(".viewopts button")) b.setAttribute("aria-pressed", String(b.dataset.view === S.view));
+  $("split-read").title = S.view === "bottom" ? "Ziehen, um Liste und Mail höher oder niedriger zu machen" : "Ziehen, um den Lesebereich breiter oder schmaler zu machen";
+  if ($("main")) render();
+  fitMail();
+}
+for (const b of document.querySelectorAll(".viewopts button")) b.onclick = () => applyView(b.dataset.view);
+$("btn-settings").onclick = (e) => {
+  e.stopPropagation();
+  const p = $("settings"); p.hidden = !p.hidden;
+  $("btn-settings").setAttribute("aria-expanded", String(!p.hidden));
+};
+document.addEventListener("pointerdown", (e) => {
+  if (!$("settings").hidden && !e.target.closest("#settings, #btn-settings")) { $("settings").hidden = true; $("btn-settings").setAttribute("aria-expanded", "false"); }
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("settings").hidden) { e.stopPropagation(); $("settings").hidden = true; }
+}, true);
 
 /* ---------- Start ---------- */
 async function start() {
   applyTheme(load("theme") || "auto");
   applySize(load("scale") || "1");
   applyWidths();
+  const lh = Number(load("listH")) || 0;
+  if (lh) document.body.style.setProperty("--list-h", lh + "px");
+  applyView(load("view") || "right");
   invoke("app_version").then((v) => { $("ver").textContent = "Version " + v; }).catch(() => {});
   const acc = await invoke("get_account");
   if (!acc) return showSetup();
@@ -236,6 +273,7 @@ async function reloadList() {
   if (!S.list.length) $("mails").innerHTML = `<div class="empty">Lade Nachrichten …</div>`;
   try {
     S.list = applyLocal(await invoke("list_messages", { folder: S.folder, limit: 300 }));
+    S.base = S.list.slice();
   } catch (err) {
     S.list = [];
     toast("Nachrichten konnten nicht geladen werden: " + err, true);
@@ -247,29 +285,69 @@ async function reloadList() {
 /* ---------- Suche ---------- */
 const isAllSearch = () => S.scope === "all" && S.query !== "";
 let searchT;
+// Beim Tippen sofort in den schon geladenen Mails suchen (Absender, Betreff),
+// kurz danach zusätzlich auf dem Server (auch im Text der Mails).
 $("q").addEventListener("input", () => {
   clearTimeout(searchT);
-  searchT = setTimeout(runSearch, 450);
+  quickSearch();
+  if (S.query) searchT = setTimeout(serverSearch, 600);
 });
 $("q").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { clearTimeout(searchT); runSearch(); }
   if (e.key === "Escape") { $("q").value = ""; runSearch(); $("mails").focus(); }
 });
-async function runSearch() {
-  S.query = $("q").value.trim();
-  S.opened = null;
-  renderFolders();
-  if (!S.query) return reloadList();
-  S.searching = true; render();
-  try {
-    S.list = applyLocal(await invoke("search", { query: S.query, folder: S.scope === "all" ? null : S.folder }));
-  } catch (err) {
-    S.list = [];
-    toast("Suche fehlgeschlagen: " + err, true);
-  }
-  S.searching = false;
+const norm = (t) => String(t || "").toLocaleLowerCase("de");
+function localMatches(q) {
+  const words = norm(q).split(/\s+/).filter(Boolean);
+  return S.base.filter((m) => {
+    const hay = norm(`${m.from} ${m.from_addr} ${m.to} ${m.subject}`);
+    return words.every((w) => hay.includes(w));
+  });
+}
+function quickSearch() {
+  const q = $("q").value.trim();
+  if (q === S.query) return;
+  S.query = q;
+  if (!S.compose) S.opened = null;
+  if (!q) { S.searching = false; S.list = S.base.slice(); renderFolders(); render(); return; }
+  S.searching = true;
+  S.list = S.scope === "all" ? [] : localMatches(q);
   S.sel = S.list[0] ? key(S.list[0]) : null;
   render();
+}
+// Nur eine Serversuche gleichzeitig. Wird währenddessen weitergetippt,
+// folgt danach genau eine weitere Suche mit dem neuesten Text.
+let searchBusy = false, searchAgain = false;
+async function serverSearch() {
+  if (!S.query) return;
+  if (searchBusy) { searchAgain = true; return; }
+  searchBusy = true;
+  const q = S.query, scope = S.scope, folder = S.folder;
+  let res = null, failed = null;
+  try { res = applyLocal(await invoke("search", { query: q, folder: scope === "all" ? null : folder })); }
+  catch (err) { failed = err; }
+  searchBusy = false;
+  if (q === S.query && scope === S.scope && folder === S.folder) {
+    if (failed) toast("Suche fehlgeschlagen: " + failed, true);
+    else {
+      // Treffer aus der Sofortsuche behalten, Servertreffer dazunehmen.
+      const seen = new Set(res.map(key));
+      const extra = scope === "all" ? [] : localMatches(q).filter((m) => !seen.has(key(m)));
+      S.list = [...res, ...extra].sort((a, b) => b.date - a.date);
+    }
+    S.searching = false;
+    if (!find(S.sel)) S.sel = S.list[0] ? key(S.list[0]) : null;
+    render();
+  }
+  if (searchAgain) { searchAgain = false; serverSearch(); }
+}
+async function runSearch() {
+  clearTimeout(searchT);
+  S.query = null; // erzwingt neue Sofortsuche
+  quickSearch();
+  renderFolders();
+  if (!S.query) return reloadList();
+  await serverSearch();
 }
 function setScope(s) {
   S.scope = s;
@@ -288,11 +366,11 @@ function render() {
   $("ftitle").textContent = all ? "Suche in allen Ordnern" : folderName(S.folder);
   const f = S.folders.find((x) => x.id === S.folder);
   $("sum").textContent = S.query
-    ? (S.searching ? "Suche läuft …" : `${S.list.length} Treffer ${all ? "in allen Ordnern" : "in " + folderName(S.folder)}`)
+    ? (S.searching ? `${S.list.length ? S.list.length + " Treffer, " : ""}suche weiter …` : `${S.list.length} Treffer ${all ? "in allen Ordnern" : "in " + folderName(S.folder)}`)
     : f ? `${f.unseen} ungelesen · ${f.total} Nachrichten` : "";
   $("col-who").textContent = all ? "Von / An" : isSentFolder(S.folder) ? "An" : "Von";
 
-  if (S.searching) {
+  if (S.searching && !S.list.length) {
     box.innerHTML = `<div class="empty">Suche läuft …</div>`;
   } else {
     if (!S.list.length) {
@@ -304,6 +382,7 @@ function render() {
     for (const m of S.list) box.appendChild(row(m, all));
   }
   $("main").classList.toggle("open", S.opened !== null);
+  $("main").classList.toggle("wide", S.opened === null || S.view === "bottom");
   box.querySelector(".mail.on")?.scrollIntoView({ block: "nearest" });
 }
 
@@ -323,6 +402,10 @@ function row(m, showFolder) {
   el.querySelector(".fold").textContent = folderName(m.folder);
   el.querySelector(".date").textContent = fmtDate(m.date);
   el.querySelector(".subj").textContent = m.subject || "(kein Betreff)";
+  if (m.has_att) {
+    const a = document.createElement("span"); a.className = "clip"; a.textContent = "📎"; a.title = "Mit Anhang";
+    el.querySelector(".subj").prepend(a);
+  }
   if (showFolder) {
     const t = document.createElement("span"); t.className = "tag"; t.textContent = folderName(m.folder);
     el.querySelector(".subj").prepend(t);
@@ -442,7 +525,7 @@ function showMessage(msg) {
   r.querySelector(".meta b").textContent = msg.from_addr && msg.from !== msg.from_addr ? `${msg.from} <${msg.from_addr}>` : msg.from;
   r.querySelector(".to").textContent = `an ${msg.to}${msg.cc ? ", Kopie: " + msg.cc : ""} · ${fmtLong(msg.date)}`;
   const atts = r.querySelector(".atts");
-  for (const a of msg.attachments) { const s = document.createElement("span"); s.textContent = "📎 " + a; atts.appendChild(s); }
+  renderAttachments(atts, msg);
   // Externe Inhalte (Bilder, Schriften aus dem Netz) sind zuerst gesperrt:
   // Beim Laden würde der Absender erfahren, dass und wann du die Mail liest.
   const hasExternal = !!msg.html && /(src|background|srcset)\s*=\s*["']?\s*(https?:)?\/\/|url\(\s*["']?\s*(https?:)?\/\//i.test(msg.html);
@@ -461,6 +544,62 @@ function showMessage(msg) {
   $("r-all").onclick = () => openCompose("all", msg);
   $("r-fwd").onclick = () => openCompose("forward", msg);
   $("r-del").onclick = () => remove(key(msg));
+}
+
+// Anhänge gut sichtbar als Kästchen: Klick öffnet die Datei mit dem
+// passenden Programm, „Sichern“ legt sie in den Ordner „Downloads“.
+function attIcon(name) {
+  const e = (name.split(".").pop() || "").toLowerCase();
+  if (e === "pdf") return "📄";
+  if (["jpg", "jpeg", "png", "gif", "heic", "webp", "bmp", "tif", "tiff"].includes(e)) return "🖼️";
+  if (["doc", "docx", "odt", "rtf", "txt", "pages"].includes(e)) return "📝";
+  if (["xls", "xlsx", "ods", "csv", "numbers"].includes(e)) return "📊";
+  if (["ppt", "pptx", "key", "odp"].includes(e)) return "📽️";
+  if (["zip", "rar", "7z", "gz", "tar"].includes(e)) return "🗜️";
+  if (["mp3", "wav", "m4a", "aac", "flac", "aif", "aiff", "ogg"].includes(e)) return "🎵";
+  if (["mp4", "mov", "avi", "mkv", "m4v"].includes(e)) return "🎬";
+  if (e === "ics") return "📅";
+  return "📎";
+}
+function fmtBytes(n) {
+  if (!n) return "";
+  return n > 1048576 ? (n / 1048576).toFixed(1).replace(".", ",") + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
+}
+function renderAttachments(box, msg) {
+  box.innerHTML = "";
+  if (!msg.attachments.length) { box.hidden = true; return; }
+  box.hidden = false;
+  const head = document.createElement("div");
+  head.className = "atts-head";
+  head.textContent = msg.attachments.length === 1 ? "📎 1 Anhang" : `📎 ${msg.attachments.length} Anhänge`;
+  box.appendChild(head);
+  const list = document.createElement("div");
+  list.className = "atts-list";
+  msg.attachments.forEach((name, index) => {
+    const card = document.createElement("div");
+    card.className = "attcard";
+    const open = document.createElement("button");
+    open.type = "button"; open.className = "att-open"; open.title = "Öffnen: " + name;
+    open.innerHTML = `<span class="att-ic"></span><span class="att-txt"><span class="att-name"></span><span class="att-size"></span></span>`;
+    open.querySelector(".att-ic").textContent = attIcon(name);
+    open.querySelector(".att-name").textContent = name;
+    open.querySelector(".att-size").textContent = fmtBytes(msg.att_sizes?.[index]);
+    const save = document.createElement("button");
+    save.type = "button"; save.className = "att-save"; save.textContent = "Sichern"; save.title = "In „Downloads“ speichern";
+    const run = async (cmd, btn) => {
+      btn.disabled = true;
+      try {
+        const res = await invoke(cmd, { folder: msg.folder, uid: msg.uid, index });
+        if (res) toast(res);
+      } catch (err) { toast("Anhang: " + err, true); }
+      finally { btn.disabled = false; }
+    };
+    open.onclick = () => run("open_attachment", open);
+    save.onclick = () => run("save_attachment", save);
+    card.append(open, save);
+    list.appendChild(card);
+  });
+  box.appendChild(list);
 }
 
 // Zeigt den Inhalt in einem abgeschotteten Rahmen: Skripte laufen nie,
@@ -579,6 +718,8 @@ function takeOut(k) {
   const next = S.list[i + 1] || S.list[i - 1];
   const wasOpen = S.opened === k;
   S.list.splice(i, 1);
+  const bi = S.base.findIndex((x) => key(x) === k);
+  if (bi >= 0) S.base.splice(bi, 1);
   if (!m.seen) bumpUnread(m.folder, -1);
   S.sel = next ? key(next) : null;
   if (wasOpen) S.opened = null;
@@ -588,6 +729,7 @@ function takeOut(k) {
 }
 function putBack({ m, i }) {
   S.list.splice(i, 0, m);
+  if (!S.base.some((x) => key(x) === key(m))) { S.base.push(m); S.base.sort((a, b) => b.date - a.date); }
   if (!m.seen) bumpUnread(m.folder, 1);
   render();
 }

@@ -310,6 +310,72 @@ fn is_app_url(url: &tauri::Url) -> bool {
     }
 }
 
+/// Dateiarten, die Programme starten können. Solche Anhänge werden nie
+/// direkt geöffnet, sondern nur im Ordner gezeigt.
+const RISKY: &[&str] = &[
+    "exe", "msi", "bat", "cmd", "com", "scr", "pif", "ps1", "vbs", "vbe", "js", "jse", "wsf", "wsh", "hta", "cpl", "msc",
+    "jar", "lnk", "reg", "app", "command", "sh", "pkg", "mpkg", "workflow", "scpt", "applescript", "terminal", "url", "webloc", "inetloc", "iso", "img", "dmg", "html", "htm", "svg", "xhtml",
+];
+
+fn safe_name(name: &str) -> String {
+    let n: String = name
+        .chars()
+        .map(|c| if c.is_control() || "/\\:*?\"<>|".contains(c) { '_' } else { c })
+        .collect();
+    let n = n.trim().trim_start_matches('.').trim().to_string();
+    if n.is_empty() { "Anhang".into() } else { n.chars().take(150).collect() }
+}
+
+fn is_risky(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    let ext = lower.rsplit('.').next().unwrap_or("");
+    lower.contains('.') && RISKY.contains(&ext)
+}
+
+/// Freier Dateiname im Ordner: „Datei.pdf“, sonst „Datei (2).pdf“ usw.
+fn free_path(dir: &std::path::Path, name: &str) -> PathBuf {
+    let p = dir.join(name);
+    if !p.exists() {
+        return p;
+    }
+    let (stem, ext) = match name.rfind('.') {
+        Some(i) if i > 0 => (&name[..i], &name[i..]),
+        _ => (name, ""),
+    };
+    (2..1000).map(|n| dir.join(format!("{stem} ({n}){ext}"))).find(|p| !p.exists()).unwrap_or(p)
+}
+
+/// Öffnet einen Anhang mit dem passenden Programm (z.B. PDF-Anzeige).
+/// Er wird dazu in einen Ordner für vorübergehende Dateien gelegt.
+#[tauri::command]
+async fn open_attachment(app: tauri::AppHandle, folder: String, uid: u32, index: usize) -> Result<String, String> {
+    use tauri_plugin_opener::OpenerExt;
+    let a = blocking(app.clone(), move |c| c.attachment(&folder, uid, index)).await?;
+    let name = safe_name(&a.name);
+    let dir = std::env::temp_dir().join("Nemeton Mail Anhänge");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = free_path(&dir, &name);
+    std::fs::write(&path, &a.data).map_err(|e| format!("Anhang konnte nicht abgelegt werden: {e}"))?;
+    if is_risky(&name) {
+        app.opener().reveal_item_in_dir(&path).map_err(|e| e.to_string())?;
+        return Ok(format!("„{name}“ könnte ein Programm sein und wird aus Sicherheitsgründen nicht geöffnet. Die Datei wird im Ordner gezeigt."));
+    }
+    app.opener().open_path(path.to_string_lossy(), None::<&str>).map_err(|e| format!("Kein Programm zum Öffnen gefunden: {e}"))?;
+    Ok(String::new())
+}
+
+/// Speichert einen Anhang im Ordner „Downloads“ und zeigt ihn dort.
+#[tauri::command]
+async fn save_attachment(app: tauri::AppHandle, folder: String, uid: u32, index: usize) -> Result<String, String> {
+    use tauri_plugin_opener::OpenerExt;
+    let a = blocking(app.clone(), move |c| c.attachment(&folder, uid, index)).await?;
+    let dir = app.path().download_dir().map_err(|_| "Der Ordner „Downloads“ wurde nicht gefunden.")?;
+    let path = free_path(&dir, &safe_name(&a.name));
+    std::fs::write(&path, &a.data).map_err(|e| format!("Speichern fehlgeschlagen: {e}"))?;
+    let _ = app.opener().reveal_item_in_dir(&path);
+    Ok(format!("Gespeichert in Downloads: {}", path.file_name().unwrap_or_default().to_string_lossy()))
+}
+
 #[tauri::command]
 fn app_version(app: tauri::AppHandle) -> String {
     app.package_info().version.to_string()
@@ -409,6 +475,8 @@ pub fn run() {
             set_test_mode,
             open_link,
             app_version,
+            open_attachment,
+            save_attachment,
             save_identity,
             send_mail,
             list_folders,
@@ -421,4 +489,19 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("Nemeton Mail konnte nicht starten");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn attachment_names() {
+        assert_eq!(safe_name("../../etc/passwd"), "_.._etc_passwd");
+        assert_eq!(safe_name("Rechnung: Okt.pdf"), "Rechnung_ Okt.pdf");
+        assert_eq!(safe_name(""), "Anhang");
+        assert!(is_risky("Setup.EXE"));
+        assert!(is_risky("x.pdf.app"));
+        assert!(!is_risky("Rechnung.pdf"));
+        assert!(!is_risky("exe"));
+    }
 }
