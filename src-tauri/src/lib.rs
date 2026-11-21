@@ -7,6 +7,7 @@
 //! Windows-Anmeldeinformationsverwaltung), nie in einer Datei.
 
 pub mod imap_client;
+pub mod smtp;
 
 use imap_client::{Account, Folder, FullMessage, MailClient, Summary};
 use serde::{Deserialize, Serialize};
@@ -29,6 +30,21 @@ struct AccountFile {
     /// Testmodus: nichts auf dem Server ändern. Standard: an.
     #[serde(default = "default_true")]
     test_mode: bool,
+    /// Dein Name, wie ihn Empfänger sehen.
+    #[serde(default)]
+    name: String,
+    /// Weitere Absenderadressen (Aliasse bei Posteo).
+    #[serde(default)]
+    aliases: Vec<String>,
+    /// Postausgangsserver; leer = wie IMAP-Server.
+    #[serde(default)]
+    smtp_host: String,
+    #[serde(default = "default_smtp_port")]
+    smtp_port: u16,
+}
+
+fn default_smtp_port() -> u16 {
+    465
 }
 
 fn default_true() -> bool {
@@ -109,11 +125,152 @@ async fn save_account(
     keyring::Entry::new(KEYRING_SERVICE, &email)
         .and_then(|e| e.set_password(&password))
         .map_err(|e| format!("Passwort konnte nicht im Schlüsselbund gespeichert werden: {e}"))?;
-    let file = AccountFile { email, host, port, test_mode: true };
+    let file = AccountFile { email, host, port, test_mode: true, name: String::new(), aliases: vec![], smtp_host: String::new(), smtp_port: 465 };
     std::fs::write(account_path(&app)?, serde_json::to_string_pretty(&file).unwrap())
         .map_err(|e| e.to_string())?;
     *state.client.lock().unwrap() = Some(client);
     Ok(())
+}
+
+fn write_account(app: &tauri::AppHandle, acc: &AccountFile) -> Result<(), String> {
+    std::fs::write(account_path(app)?, serde_json::to_string_pretty(acc).unwrap()).map_err(|e| e.to_string())
+}
+
+/// Speichert deinen Namen und deine weiteren Absenderadressen.
+#[tauri::command]
+fn save_identity(app: tauri::AppHandle, name: String, aliases: Vec<String>) -> Result<(), String> {
+    let mut acc = load_account(&app).ok_or("Noch kein Konto eingerichtet.")?;
+    acc.name = name.trim().to_string();
+    let mut list: Vec<String> = Vec::new();
+    for a in aliases {
+        let a = a.trim().to_lowercase();
+        if !a.is_empty() && a != acc.email.to_lowercase() && !list.contains(&a) {
+            smtp::mailbox(&a)?;
+            list.push(a);
+        }
+    }
+    acc.aliases = list;
+    write_account(&app, &acc)
+}
+
+#[derive(Deserialize)]
+struct MsgRef {
+    folder: String,
+    uid: u32,
+}
+
+#[derive(Deserialize)]
+struct NewAttachment {
+    name: String,
+    mime: String,
+    /// Inhalt, Base64-kodiert.
+    data: String,
+}
+
+#[derive(Deserialize)]
+struct Draft {
+    from: String,
+    to: Vec<String>,
+    cc: Vec<String>,
+    bcc: Vec<String>,
+    subject: String,
+    html: String,
+    text: String,
+    in_reply_to: Option<String>,
+    references: Option<String>,
+    attachments: Vec<NewAttachment>,
+    /// Beim Weiterleiten: Anhänge dieser Mail mitschicken.
+    forward: Option<MsgRef>,
+    forward_skip: Option<Vec<String>>,
+    /// Beim Antworten: diese Mail als „beantwortet“ markieren.
+    answered: Option<MsgRef>,
+}
+
+/// Verschickt eine Mail. Im Testmodus geht sie nur an dich selbst
+/// (mit dem Hinweis, an wen sie eigentlich gegangen wäre), und auf dem
+/// Server wird sonst nichts geändert.
+#[tauri::command]
+async fn send_mail(app: tauri::AppHandle, draft: Draft) -> Result<String, String> {
+    use base64::Engine;
+    let acc = load_account(&app).ok_or("Noch kein Konto eingerichtet.")?;
+    let pw = password_for(&acc.email)?;
+    let test = acc.test_mode;
+    // Absender muss eine deiner Adressen sein.
+    let from_addr = draft.from.trim().to_lowercase();
+    if from_addr != acc.email.to_lowercase() && !acc.aliases.iter().any(|a| *a == from_addr) {
+        return Err("Diese Absenderadresse ist nicht eingerichtet.".into());
+    }
+    let from = if acc.name.is_empty() { smtp::mailbox(&from_addr)? } else {
+        lettre::message::Mailbox::new(Some(acc.name.clone()), from_addr.parse().map_err(|_| "Ungültige Absenderadresse.")?)
+    };
+    let parse = |l: &[String]| l.iter().filter(|s| !s.trim().is_empty()).map(|s| smtp::mailbox(s)).collect::<Result<Vec<_>, _>>();
+    let (mut to, mut cc, mut bcc) = (parse(&draft.to)?, parse(&draft.cc)?, parse(&draft.bcc)?);
+    let mut subject = draft.subject.clone();
+    let (mut html, mut text) = (draft.html.clone(), draft.text.clone());
+    if test {
+        let list = |l: &[lettre::message::Mailbox]| l.iter().map(|m| m.to_string()).collect::<Vec<_>>().join(", ");
+        let note = format!(
+            "Testmodus: Diese Mail ging nur an dich. Eigentlich an: {}{}{}",
+            list(&to),
+            if cc.is_empty() { String::new() } else { format!(" · Kopie: {}", list(&cc)) },
+            if bcc.is_empty() { String::new() } else { format!(" · Blindkopie: {}", list(&bcc)) }
+        );
+        if to.is_empty() && cc.is_empty() && bcc.is_empty() {
+            return Err("Bitte mindestens einen Empfänger eintragen.".into());
+        }
+        let esc = note.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+        html = format!("<div style=\"background:#fff3c4;border:1px solid #e0c060;padding:6px 10px;margin-bottom:12px;font-family:sans-serif;font-size:13px\">{esc}</div>{html}");
+        text = format!("[{note}]\n\n{text}");
+        subject = format!("[Test] {subject}");
+        to = vec![smtp::mailbox(&acc.email)?];
+        cc.clear();
+        bcc.clear();
+    }
+    let mut attachments = Vec::new();
+    for a in &draft.attachments {
+        let data = base64::engine::general_purpose::STANDARD.decode(a.data.as_bytes()).map_err(|_| format!("Anhang „{}“ ist beschädigt.", a.name))?;
+        attachments.push(smtp::OutAttachment { name: a.name.clone(), mime: a.mime.clone(), data });
+    }
+    if let Some(f) = draft.forward {
+        let skip = draft.forward_skip.clone().unwrap_or_default();
+        let list = blocking(app.clone(), move |c| c.attachments(&f.folder, f.uid)).await?;
+        for a in list.into_iter().filter(|a| !skip.contains(&a.name)) {
+            attachments.push(smtp::OutAttachment { name: a.name, mime: a.mime, data: a.data });
+        }
+    }
+    let out = smtp::Outgoing {
+        from, to, cc, bcc, subject, html, text,
+        in_reply_to: draft.in_reply_to.clone(),
+        references: draft.references.clone(),
+        attachments,
+    };
+    let server = smtp::Server {
+        host: if acc.smtp_host.is_empty() { acc.host.clone() } else { acc.smtp_host.clone() },
+        port: acc.smtp_port,
+        user: acc.email.clone(),
+        password: pw,
+    };
+    let raw = tauri::async_runtime::spawn_blocking(move || smtp::send(&server, &out)).await.map_err(|e| e.to_string())??;
+    if test {
+        return Ok("Testmodus: Die Mail ging nur an dich selbst.".into());
+    }
+    // Kopie in „Gesendet“ ablegen und die beantwortete Mail markieren.
+    let answered = draft.answered;
+    let saved = blocking(app, move |c| {
+        let sent = c.list_folders()?.into_iter().find(|f| f.role == "sent").map(|f| f.id);
+        if let Some(r) = &answered {
+            let _ = c.set_answered(&r.folder, r.uid);
+        }
+        match &sent {
+            Some(s) => c.append(s, &raw).map(|_| true),
+            None => Ok(false),
+        }
+    })
+    .await;
+    Ok(match saved {
+        Ok(true) => "Gesendet.".into(),
+        _ => "Gesendet. Die Kopie im Ordner „Gesendet“ konnte aber nicht abgelegt werden.".into(),
+    })
 }
 
 #[tauri::command]
@@ -252,6 +409,8 @@ pub fn run() {
             set_test_mode,
             open_link,
             app_version,
+            save_identity,
+            send_mail,
             list_folders,
             list_messages,
             get_message,

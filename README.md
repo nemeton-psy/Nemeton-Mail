@@ -6,9 +6,11 @@ Ein eigenes, schlankes E-Mail-Programm für macOS und Windows.
 
 Solange der **Testmodus** an ist (gelb hinterlegt oben links), ändert die App auf dem Mailserver nichts:
 Ordner werden nur zum Lesen geöffnet, Mails bleiben dort ungelesen, und Löschen oder Markieren passiert nur in der App.
+Auch Mails schreiben lässt sich gefahrlos ausprobieren: Im Testmodus geht jede Mail **nur an dich selbst**
+(mit „[Test]“ im Betreff und dem Hinweis, an wen sie eigentlich gegangen wäre).
 Ein- und Ausschalten oben in der Programmleiste („Testmodus: Einschalten / Ausschalten“, Ausschalten mit Bestätigung).
 
-## Was es schon kann (Version 0.1)
+## Was es schon kann (Version 0.2)
 
 - Mit dem eigenen Postfach verbinden (für Posteo voreingestellt). Das Passwort liegt im Schlüsselbund des Computers.
 - Ordner mit Anzahl ungelesener Mails
@@ -25,10 +27,17 @@ Ein- und Ausschalten oben in der Programmleiste („Testmodus: Einschalten / Aus
 - Passt sich an große Monitore und kleine Bildschirme an
 - Mails werden geschützt angezeigt: Skripte laufen nie; Bilder aus dem Netz sind gesperrt, bis man auf „Externe Inhalte anzeigen“ klickt
 - Links öffnen im normalen Browser (nur Webseiten und E-Mail-Adressen); beim Drüberfahren steht unten, wohin der Link führt
+- **Mails schreiben** rechts im Lesebereich: Neue Nachricht, Antworten, Allen antworten, Weiterleiten (auch per Rechtsklick in der Liste)
+- Beim Antworten wird die Mail automatisch zitiert; beim Weiterleiten gehen die Anhänge mit (einzeln abwählbar)
+- Adressen in **An**, **Kopie** und **Blindkopie** als Kästchen: mit der Maus zwischen den Feldern verschieben, Doppelklick zum Ändern, × zum Entfernen
+- **Deine Schrift** (Verdana, Arial, Tahoma, Trebuchet MS, Georgia oder Times New Roman – alle auf Mac, Windows und iPhone vorhanden) wird fest in die Mail geschrieben. Eingefügter Text verliert fremde Schriften. Wenn dich jemand zitiert, wird dein Text beim Lesen wieder in deiner Schrift gezeigt
+- Anhänge per Knopf oder per Ziehen auf den Schreibbereich
+- Weitere Absenderadressen (Posteo-Aliasse) im Feld „Von“; beim Antworten wird automatisch die Adresse gewählt, an die die Mail ging
+- Gesendete Mails landen im Ordner „Gesendet“, beantwortete werden als beantwortet markiert
 
 ## Geplant
 
-Mails schreiben und beantworten · Kalender mit dem Synology-NAS (CalDAV) · Filterregeln · überall dieselbe Schrift
+Entwürfe speichern · Kalender mit dem Synology-NAS (CalDAV) · Filterregeln · überall dieselbe Schrift
 
 ## Installieren
 

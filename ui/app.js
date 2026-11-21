@@ -117,6 +117,7 @@ async function start() {
   invoke("app_version").then((v) => { $("ver").textContent = "Version " + v; }).catch(() => {});
   const acc = await invoke("get_account");
   if (!acc) return showSetup();
+  S.acc = acc;
   setTestMode(acc.test_mode !== false);
   showApp();
 }
@@ -148,6 +149,7 @@ $("setup-form").addEventListener("submit", async (e) => {
       port: Number($("s-port").value) || 993,
     });
     $("s-pass").value = "";
+    S.acc = await invoke("get_account");
     setTestMode(true);
     showApp();
   } catch (err) {
@@ -404,7 +406,7 @@ async function toggleSeen(m) {
 let openToken = 0;
 async function openMail(k) {
   const m = find(k);
-  if (!m) return;
+  if (!m || !leaveCompose()) return;
   S.sel = k; S.opened = k;
   if (!m.seen) { m.seen = true; bumpUnread(m.folder, -1); if (S.testMode) S.localSeen.set(k, true); }
   render();
@@ -419,12 +421,14 @@ async function openMail(k) {
 }
 
 function showMessage(msg) {
+  S.msg = msg;
   const r = $("read");
   r.innerHTML = `
     <div class="read-head">
       <div class="acts">
-        <button type="button" disabled title="Kommt bald">Antworten</button>
-        <button type="button" disabled title="Kommt bald">Weiterleiten</button>
+        <button type="button" id="r-reply">Antworten</button>
+        <button type="button" id="r-all" title="Antwort an alle Empfänger dieser Mail">Allen antworten</button>
+        <button type="button" id="r-fwd">Weiterleiten</button>
         <button type="button" id="r-del">Löschen</button>
         <button type="button" class="close" id="r-close" title="Rücktaste">Schließen ✕</button>
       </div>
@@ -453,6 +457,9 @@ function showMessage(msg) {
   r.querySelector(".read-body").appendChild(status);
   renderBody(msg, false);
   $("r-close").onclick = closeMail;
+  $("r-reply").onclick = () => openCompose("reply", msg);
+  $("r-all").onclick = () => openCompose("all", msg);
+  $("r-fwd").onclick = () => openCompose("forward", msg);
   $("r-del").onclick = () => remove(key(msg));
 }
 
@@ -477,6 +484,7 @@ function renderBody(msg, external) {
       for (const img of doc.querySelectorAll("img")) { img.removeAttribute("width"); img.removeAttribute("height"); }
     }
     prepareLinks(doc);
+    markOwnText(doc);
     wireLinks(doc);
     fitMail();
   };
@@ -556,6 +564,7 @@ function fitMail() {
 if (window.ResizeObserver) new ResizeObserver(() => fitMail()).observe($("read"));
 
 function closeMail() {
+  if (S.compose) { if (!leaveCompose()) return; $("read").innerHTML = ""; }
   S.opened = null;
   render();
   $("mails").focus();
@@ -621,6 +630,15 @@ async function moveMail(k, target) {
   }
 }
 
+// Antworten/Weiterleiten aus der Liste heraus (ohne die Mail zu öffnen).
+async function composeFor(k, kind) {
+  const m = find(k);
+  if (!m) return;
+  if (S.msg && key(S.msg) === k) return openCompose(kind, S.msg);
+  try { openCompose(kind, await invoke("get_message", { folder: m.folder, uid: m.uid })); }
+  catch (err) { toast("Die Nachricht konnte nicht geladen werden: " + err, true); }
+}
+
 /* ---------- Rechtsklick-Menü ---------- */
 const menu = document.createElement("div");
 menu.className = "menu"; menu.hidden = true; menu.setAttribute("role", "menu");
@@ -641,6 +659,10 @@ function showMenu(x, y, k) {
   menu.innerHTML = "";
   menuItem(menu, "Öffnen", () => openMail(k));
   menuItem(menu, m.seen ? "Als ungelesen markieren" : "Als gelesen markieren", () => toggleSeen(m));
+  const sepR = document.createElement("div"); sepR.className = "sep"; menu.appendChild(sepR);
+  menuItem(menu, "Antworten", () => composeFor(k, "reply"));
+  menuItem(menu, "Allen antworten", () => composeFor(k, "all"));
+  menuItem(menu, "Weiterleiten", () => composeFor(k, "forward"));
   const sep = document.createElement("div"); sep.className = "sep"; menu.appendChild(sep);
   const mv = menuItem(menu, "Verschieben in", null, { sub: true });
   const sub = document.createElement("div");
@@ -702,7 +724,7 @@ $("mails").addEventListener("keydown", (e) => {
 });
 // Rücktaste/Esc auch, wenn der Fokus im Lesebereich liegt.
 document.addEventListener("keydown", (e) => {
-  if (S.opened === null || e.target.closest?.("input, textarea, #mails")) return;
+  if (S.opened === null || S.compose || e.target.closest?.("input, textarea, select, [contenteditable], #mails")) return;
   if (e.key === "Backspace" || e.key === "Escape") { e.preventDefault(); closeMail(); }
   if (e.key === "Delete") { e.preventDefault(); remove(S.opened); }
 });
@@ -724,7 +746,7 @@ $("btn-refresh").onclick = async () => {
     b.classList.remove("busy"); b.textContent = "↻ Abrufen";
   }
 };
-$("btn-new").onclick = () => toast("Mails schreiben kommt im nächsten Schritt.");
+$("btn-new").onclick = () => openCompose("new");
 $("btn-logout").onclick = async () => {
   await invoke("logout");
   S.list = []; S.folders = []; S.sel = S.opened = null;

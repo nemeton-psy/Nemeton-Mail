@@ -59,6 +59,27 @@ pub struct FullMessage {
     pub html: Option<String>,
     pub text: Option<String>,
     pub attachments: Vec<String>,
+    /// Für Antworten: Kennung der Mail und bisheriger Gesprächsverlauf.
+    pub message_id: String,
+    pub references: String,
+    /// Einzelne Adressen (für Antworten / Allen antworten).
+    pub from_list: Vec<Addr>,
+    pub reply_to: Vec<Addr>,
+    pub to_list: Vec<Addr>,
+    pub cc_list: Vec<Addr>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct Addr {
+    pub name: String,
+    pub addr: String,
+}
+
+/// Ein Anhang mit Inhalt (zum Weiterleiten).
+pub struct AttachmentData {
+    pub name: String,
+    pub mime: String,
+    pub data: Vec<u8>,
 }
 
 pub struct MailClient {
@@ -171,7 +192,7 @@ impl MailClient {
             let Some(uid) = f.uid else { continue };
             let raw = header_bytes(f).unwrap_or_default();
             let (headers, _) = mailparse::parse_headers(&raw).map_err(err)?;
-            let (from, from_addr) = parse_from(headers.get_first_value("From").as_deref().unwrap_or(""));
+            let (from, from_addr) = from_of(&headers);
             let date = headers
                 .get_first_value("Date")
                 .and_then(|d| mailparse::dateparse(&d).ok())
@@ -182,7 +203,7 @@ impl MailClient {
                 folder: folder.to_string(),
                 from,
                 from_addr,
-                to: parse_to(headers.get_first_value("To").as_deref().unwrap_or("")),
+                to: to_of(&headers),
                 subject: headers.get_first_value("Subject").unwrap_or_default(),
                 date,
                 seen: f.flags().iter().any(|x| matches!(x, Flag::Seen)),
@@ -203,7 +224,7 @@ impl MailClient {
         let body = f.body().ok_or("Mail ist leer.")?;
         let parsed = mailparse::parse_mail(body).map_err(err)?;
         let h = &parsed.headers;
-        let (from, from_addr) = parse_from(h.get_first_value("From").as_deref().unwrap_or(""));
+        let (from, from_addr) = from_of(h);
         let mut msg = FullMessage {
             uid,
             folder: folder.to_string(),
@@ -216,9 +237,48 @@ impl MailClient {
             html: None,
             text: None,
             attachments: vec![],
+            message_id: h.get_first_value("Message-ID").unwrap_or_default().trim().to_string(),
+            references: h.get_first_value("References").unwrap_or_default().split_whitespace().collect::<Vec<_>>().join(" "),
+            from_list: header_addrs(h, "From"),
+            reply_to: header_addrs(h, "Reply-To"),
+            to_list: header_addrs(h, "To"),
+            cc_list: header_addrs(h, "Cc"),
         };
         collect_parts(&parsed, &mut msg);
         Ok(msg)
+    }
+
+    /// Holt die Anhänge einer Mail mit Inhalt (zum Weiterleiten).
+    /// Ändert nichts auf dem Server (BODY.PEEK).
+    pub fn attachments(&mut self, folder: &str, uid: u32) -> Result<Vec<AttachmentData>, String> {
+        self.select(folder)?;
+        let fetches = self.session.uid_fetch(uid.to_string(), "(UID BODY.PEEK[])").map_err(err)?;
+        let f = fetches.iter().next().ok_or("Mail nicht gefunden.")?;
+        let body = f.body().ok_or("Mail ist leer.")?;
+        let parsed = mailparse::parse_mail(body).map_err(err)?;
+        let mut out = Vec::new();
+        collect_attachments(&parsed, &mut out);
+        Ok(out)
+    }
+
+    /// Legt eine fertige Mail in einem Ordner ab (z.B. Kopie in „Gesendet“).
+    pub fn append(&mut self, folder: &str, raw: &[u8]) -> Result<(), String> {
+        if self.read_only {
+            return Err(READ_ONLY_MSG.into());
+        }
+        self.session.append_with_flags(folder, raw, &[Flag::Seen]).map_err(err)?;
+        self.selected = None;
+        Ok(())
+    }
+
+    /// Markiert die Mail als „beantwortet“.
+    pub fn set_answered(&mut self, folder: &str, uid: u32) -> Result<(), String> {
+        if self.read_only {
+            return Err(READ_ONLY_MSG.into());
+        }
+        self.select(folder)?;
+        self.session.uid_store(uid.to_string(), "+FLAGS.SILENT (\\Answered)").map_err(err)?;
+        Ok(())
     }
 
     pub fn set_seen(&mut self, folder: &str, uid: u32, seen: bool) -> Result<(), String> {
@@ -344,6 +404,23 @@ fn role_of(id: &str, attrs: &[NameAttribute]) -> String {
     .into()
 }
 
+fn from_of(h: &[mailparse::MailHeader]) -> (String, String) {
+    match header_addrs(h, "From").into_iter().next() {
+        Some(a) => (if a.name.is_empty() { a.addr.clone() } else { a.name }, a.addr),
+        None => parse_from(h.get_first_value("From").as_deref().unwrap_or("")),
+    }
+}
+
+fn to_of(h: &[mailparse::MailHeader]) -> String {
+    let list = header_addrs(h, "To");
+    let name = |a: &Addr| if a.name.is_empty() { a.addr.clone() } else { a.name.clone() };
+    match list.len() {
+        0 => parse_to(h.get_first_value("To").as_deref().unwrap_or("")),
+        1 => name(&list[0]),
+        n => format!("{} +{}", name(&list[0]), n - 1),
+    }
+}
+
 fn parse_from(raw: &str) -> (String, String) {
     if let Ok(list) = mailparse::addrparse(raw) {
         if let Some(mailparse::MailAddr::Single(s)) = list.iter().next() {
@@ -369,6 +446,66 @@ fn parse_to(raw: &str) -> String {
         0 => String::new(),
         1 => names.remove(0),
         n => format!("{} +{}", names[0], n - 1),
+    }
+}
+
+/// Liest Adressen direkt aus der Kopfzeile. So bleiben Namen wie
+/// „Müller, Jürgen“ (mit Komma und Umlauten) richtig zusammen.
+fn header_addrs(h: &[mailparse::MailHeader], name: &str) -> Vec<Addr> {
+    let Some(hd) = h.get_first_header(name) else { return vec![] };
+    match mailparse::addrparse_header(hd) {
+        Ok(list) => addr_items(&list),
+        Err(_) => addr_list(&hd.get_value()),
+    }
+}
+
+fn addr_items(list: &mailparse::MailAddrList) -> Vec<Addr> {
+    let mut out = Vec::new();
+    let mut push = |s: &mailparse::SingleInfo| {
+        out.push(Addr { name: s.display_name.clone().unwrap_or_default().trim().to_string(), addr: s.addr.trim().to_string() })
+    };
+    for a in list.iter() {
+        match a {
+            mailparse::MailAddr::Single(s) => push(s),
+            mailparse::MailAddr::Group(g) => g.addrs.iter().for_each(&mut push),
+        }
+    }
+    out
+}
+
+pub fn addr_list(raw: &str) -> Vec<Addr> {
+    let mut out = Vec::new();
+    let Ok(list) = mailparse::addrparse(raw) else { return out };
+    let mut push = |s: &mailparse::SingleInfo| {
+        out.push(Addr { name: s.display_name.clone().unwrap_or_default().trim().to_string(), addr: s.addr.trim().to_string() })
+    };
+    for a in list.iter() {
+        match a {
+            mailparse::MailAddr::Single(s) => push(s),
+            mailparse::MailAddr::Group(g) => g.addrs.iter().for_each(&mut push),
+        }
+    }
+    out
+}
+
+fn collect_attachments(p: &ParsedMail, out: &mut Vec<AttachmentData>) {
+    if !p.subparts.is_empty() {
+        for s in &p.subparts {
+            collect_attachments(s, out);
+        }
+        return;
+    }
+    let disp = p.get_content_disposition();
+    let filename = disp.params.get("filename").cloned().or_else(|| p.ctype.params.get("name").cloned());
+    let is_attachment = matches!(disp.disposition, mailparse::DispositionType::Attachment) || filename.is_some();
+    if is_attachment {
+        if let Ok(data) = p.get_body_raw() {
+            out.push(AttachmentData {
+                name: filename.unwrap_or_else(|| "Anhang".into()),
+                mime: p.ctype.mimetype.clone(),
+                data,
+            });
+        }
     }
 }
 
