@@ -19,7 +19,7 @@ const S = {
   scope: "folder",   // Suche: "folder" oder "all"
   query: "",
   searching: false,
-  testMode: true,    // Testmodus: auf dem Server wird nichts geändert
+  testMode: false,   // den Testmodus gibt es nicht mehr; alles geht an den Server
   hidden: new Set(), // im Testmodus "gelöschte" Mails (nur in der App ausgeblendet)
   localSeen: new Map(), // im Testmodus geänderter Gelesen-Status
 };
@@ -172,7 +172,7 @@ async function start() {
   const acc = await invoke("get_account");
   if (!acc) return showSetup();
   S.acc = acc;
-  setTestMode(acc.test_mode !== false);
+  setTestMode();
   showApp();
 }
 
@@ -204,7 +204,7 @@ $("setup-form").addEventListener("submit", async (e) => {
     });
     $("s-pass").value = "";
     S.acc = await invoke("get_account");
-    setTestMode(true);
+    setTestMode();
     showApp();
   } catch (err) {
     showSetup(String(err));
@@ -540,41 +540,7 @@ function applyLocal(list) {
     .filter((m) => !S.hidden.has(key(m)))
     .map((m) => (S.localSeen.has(key(m)) ? { ...m, seen: S.localSeen.get(key(m)) } : m));
 }
-function setTestMode(on) {
-  S.testMode = on;
-  $("tm-group").classList.toggle("on", on);
-  $("tm-on").setAttribute("aria-pressed", String(on));
-  $("tm-off").setAttribute("aria-pressed", String(!on));
-  $("tm-off").textContent = "Ausschalten";
-  delete $("tm-off").dataset.confirm;
-  $("tm-note").textContent = on
-    ? "An – Server bleibt unverändert"
-    : "Aus – Änderungen gehen an den Server";
-  $("tm-group").title = on
-    ? "Testmodus an: Auf dem Server wird nichts geändert. Löschen und Gelesen-Markieren passieren nur in der App."
-    : "Testmodus aus: Löschen und Markieren werden auf dem Server ausgeführt.";
-  if (!on) { S.hidden.clear(); S.localSeen.clear(); }
-}
-$("tm-off").onclick = async () => {
-  if (!S.testMode) return;
-  const b = $("tm-off");
-  if (!b.dataset.confirm) {
-    b.dataset.confirm = "1";
-    b.textContent = "Wirklich ausschalten? Nochmal klicken";
-    setTimeout(() => { if (S.testMode) setTestMode(true); }, 6000);
-    return;
-  }
-  await invoke("set_test_mode", { on: false });
-  setTestMode(false);
-  toast("Testmodus aus: Änderungen gehen jetzt an den Server.");
-  reloadList();
-};
-$("tm-on").onclick = async () => {
-  if (S.testMode) return;
-  await invoke("set_test_mode", { on: true });
-  setTestMode(true);
-  toast("Testmodus an: Auf dem Server wird nichts geändert.");
-};
+function setTestMode() { S.testMode = false; S.hidden.clear(); S.localSeen.clear(); }
 
 /* ---------- Aktionen ---------- */
 function bumpUnread(folder, delta) {
@@ -1088,11 +1054,17 @@ $("btn-logout").onclick = async () => {
   showSetup();
 };
 
-// Alle 2 Minuten nach neuen Mails sehen (nicht während einer Suche).
-setInterval(() => {
-  if ($("app").hidden || S.query) return;
-  loadFolders();
-  reloadList();
-}, 120000);
+
+// Abgleich mit dem Server: jede Minute und sofort, wenn du ins Fenster
+// zurückkommst. So stimmt die Liste mit dem Handy überein.
+let syncBusy = false, lastSync = Date.now();
+async function syncNow() {
+  if (syncBusy || $("app").hidden || S.query) return;
+  syncBusy = true; lastSync = Date.now();
+  try { await loadFolders(); await reloadList(); } catch {} finally { syncBusy = false; }
+}
+setInterval(syncNow, 60000);
+addEventListener("focus", () => { if (Date.now() - lastSync > 15000) syncNow(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - lastSync > 15000) syncNow(); });
 
 // Start: siehe Ende von categories.js (wird als letzte Datei geladen).

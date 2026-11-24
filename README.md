@@ -2,15 +2,12 @@
 
 Ein eigenes, schlankes E-Mail-Programm für macOS und Windows.
 
-## Testmodus (Standard: an)
+## Abgleich mit dem Server
 
-Solange der **Testmodus** an ist (gelb hinterlegt oben links), ändert die App auf dem Mailserver nichts:
-Ordner werden nur zum Lesen geöffnet, Mails bleiben dort ungelesen, und Löschen oder Markieren passiert nur in der App.
-Auch Mails schreiben lässt sich gefahrlos ausprobieren: Im Testmodus geht jede Mail **nur an dich selbst**
-(mit „[Test]“ im Betreff und dem Hinweis, an wen sie eigentlich gegangen wäre).
-Ein- und Ausschalten oben in der Programmleiste („Testmodus: Einschalten / Ausschalten“, Ausschalten mit Bestätigung).
+Alles, was du in der App tust (löschen, verschieben, gelesen markieren, Ordner ändern), passiert sofort auf dem Server – genau wie auf dem Handy.
+Die App gleicht sich jede Minute mit dem Server ab und sofort, wenn du ins Fenster zurückkommst. (Den früheren Testmodus gibt es seit Version 0.6 nicht mehr.)
 
-## Was es schon kann (Version 0.5)
+## Was es schon kann (Version 0.6)
 
 - Mit dem eigenen Postfach verbinden (für Posteo voreingestellt). Das Passwort liegt im Schlüsselbund des Computers.
 - Ordner mit Anzahl ungelesener Mails

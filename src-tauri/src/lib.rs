@@ -29,7 +29,7 @@ struct AccountFile {
     email: String,
     host: String,
     port: u16,
-    /// Testmodus: nichts auf dem Server ändern. Standard: an.
+    /// Früher: Testmodus. Wird nicht mehr benutzt.
     #[serde(default = "default_true")]
     test_mode: bool,
     /// Dein Name, wie ihn Empfänger sehen.
@@ -53,8 +53,9 @@ fn default_true() -> bool {
     true
 }
 
-fn test_mode(app: &tauri::AppHandle) -> bool {
-    load_account(app).map(|a| a.test_mode).unwrap_or(true)
+/// Den Testmodus gibt es nicht mehr: Alles geht direkt an den Server.
+fn test_mode(_app: &tauri::AppHandle) -> bool {
+    false
 }
 
 fn account_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -128,7 +129,7 @@ async fn save_account(
     keyring::Entry::new(KEYRING_SERVICE, &email)
         .and_then(|e| e.set_password(&password))
         .map_err(|e| format!("Passwort konnte nicht im Schlüsselbund gespeichert werden: {e}"))?;
-    let file = AccountFile { email, host, port, test_mode: true, name: String::new(), aliases: vec![], smtp_host: String::new(), smtp_port: 465 };
+    let file = AccountFile { email, host, port, test_mode: false, name: String::new(), aliases: vec![], smtp_host: String::new(), smtp_port: 465 };
     std::fs::write(account_path(&app)?, serde_json::to_string_pretty(&file).unwrap())
         .map_err(|e| e.to_string())?;
     *state.client.lock().unwrap() = Some(client);
@@ -197,7 +198,7 @@ async fn send_mail(app: tauri::AppHandle, draft: Draft) -> Result<String, String
     use base64::Engine;
     let acc = load_account(&app).ok_or("Noch kein Konto eingerichtet.")?;
     let pw = password_for(&acc.email)?;
-    let test = acc.test_mode;
+    let test = false;
     // Absender muss eine deiner Adressen sein.
     let from_addr = draft.from.trim().to_lowercase();
     if from_addr != acc.email.to_lowercase() && !acc.aliases.iter().any(|a| *a == from_addr) {
@@ -276,12 +277,6 @@ async fn send_mail(app: tauri::AppHandle, draft: Draft) -> Result<String, String
     })
 }
 
-#[tauri::command]
-fn set_test_mode(app: tauri::AppHandle, on: bool) -> Result<(), String> {
-    let mut acc = load_account(&app).ok_or("Noch kein Konto eingerichtet.")?;
-    acc.test_mode = on;
-    std::fs::write(account_path(&app)?, serde_json::to_string_pretty(&acc).unwrap()).map_err(|e| e.to_string())
-}
 
 /// Öffnet einen Link aus einer Mail im normalen Browser bzw. Mailprogramm.
 /// Nur Webseiten (http/https) und E-Mail-Adressen (mailto) sind erlaubt,
@@ -530,7 +525,6 @@ pub fn run() {
             get_account,
             save_account,
             logout,
-            set_test_mode,
             open_link,
             app_version,
             open_attachment,

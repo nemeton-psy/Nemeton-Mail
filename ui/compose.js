@@ -290,7 +290,6 @@ function openCompose(kind, msg) {
           <span class="c-title"></span>
           <button type="button" class="close" id="c-discard">Verwerfen ✕</button>
         </div>
-        <div class="c-test" id="c-test" hidden>Testmodus ist an: Die Mail geht nur an dich selbst. So kannst du gefahrlos ausprobieren.</div>
         <div class="c-row" id="c-name-row" hidden><label for="c-name">Dein Name</label>
           <input id="c-name" placeholder="So sehen Empfänger dich, z.B. Patrick Muster"></div>
         <div class="c-row"><label for="c-from">Von</label><div class="c-from-box"><select id="c-from"></select>
@@ -320,7 +319,6 @@ function openCompose(kind, msg) {
       <datalist id="addrbook"></datalist>
     </div>`;
   r.querySelector(".c-title").textContent = title;
-  $("c-test").hidden = !S.testMode;
   $("c-name-row").hidden = !!S.acc.name;
 
   // Absender
