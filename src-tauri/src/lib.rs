@@ -76,7 +76,7 @@ fn password_for(email: &str) -> Result<String, String> {
 }
 
 /// Führt `f` mit einer bestehenden Verbindung aus. Ist die Verbindung
-/// abgerissen, wird einmal neu verbunden und erneut versucht.
+/// abgerissen, wird vorher neu verbunden.
 fn with_client<T>(
     app: &tauri::AppHandle,
     state: &AppState,
@@ -84,20 +84,21 @@ fn with_client<T>(
 ) -> Result<T, String> {
     let mut guard = state.client.lock().map_err(|_| "Interner Fehler".to_string())?;
     let read_only = test_mode(app);
-    if guard.is_none() {
+    // Erst prüfen, ob die Verbindung noch steht, und sonst neu verbinden.
+    // Der eigentliche Befehl läuft dann genau einmal. (Früher wurde er bei
+    // einem Fehler wiederholt – beim Verschieben konnte das Mails doppelt
+    // bewegen oder einen Fehler melden, obwohl es geklappt hatte.)
+    let alive = guard.as_mut().map(|c| c.ping()).unwrap_or(false);
+    if !alive {
         *guard = Some(connect_saved(app)?);
     }
-    guard.as_mut().unwrap().read_only = read_only;
-    match f(guard.as_mut().unwrap()) {
-        Ok(v) => Ok(v),
-        Err(e) if e.starts_with("Testmodus") => Err(e),
-        Err(_) => {
-            let mut c = connect_saved(app)?;
-            c.read_only = read_only;
-            *guard = Some(c);
-            f(guard.as_mut().unwrap())
-        }
+    let c = guard.as_mut().unwrap();
+    c.read_only = read_only;
+    let res = f(c);
+    if res.is_err() && !c.ping() {
+        *guard = None; // beim nächsten Mal neu verbinden
     }
+    res
 }
 
 fn connect_saved(app: &tauri::AppHandle) -> Result<MailClient, String> {
@@ -455,6 +456,36 @@ async fn move_message(app: tauri::AppHandle, folder: String, uid: u32, target: S
     blocking(app, move |c| c.move_to(&folder, uid, &target)).await
 }
 
+#[tauri::command]
+async fn move_messages(app: tauri::AppHandle, folder: String, uids: Vec<u32>, target: String) -> Result<usize, String> {
+    blocking(app, move |c| c.move_many(&folder, &uids, &target)).await
+}
+
+#[tauri::command]
+async fn delete_messages(app: tauri::AppHandle, folder: String, uids: Vec<u32>) -> Result<usize, String> {
+    blocking(app, move |c| c.delete_many(&folder, &uids)).await
+}
+
+#[tauri::command]
+async fn mark_all_read(app: tauri::AppHandle, folder: String) -> Result<(), String> {
+    blocking(app, move |c| c.mark_all_read(&folder)).await
+}
+
+#[tauri::command]
+async fn create_folder(app: tauri::AppHandle, parent: String, name: String) -> Result<String, String> {
+    blocking(app, move |c| c.create_folder(&parent, &name)).await
+}
+
+#[tauri::command]
+async fn rename_folder(app: tauri::AppHandle, folder: String, name: String) -> Result<String, String> {
+    blocking(app, move |c| c.rename_folder(&folder, &name)).await
+}
+
+#[tauri::command]
+async fn delete_folder(app: tauri::AppHandle, folder: String) -> Result<usize, String> {
+    blocking(app, move |c| c.delete_folder(&folder)).await
+}
+
 /// Verschiebt erkannte Werbung aus dem Posteingang in den Ordner „Werbung“.
 #[tauri::command]
 async fn sort_ads(app: tauri::AppHandle, folder: String, uids: Vec<u32>) -> Result<usize, String> {
@@ -513,7 +544,13 @@ pub fn run() {
             delete_message,
             move_message,
             search,
-            sort_ads
+            sort_ads,
+            mark_all_read,
+            move_messages,
+            delete_messages,
+            create_folder,
+            rename_folder,
+            delete_folder
         ])
         .run(tauri::generate_context!())
         .expect("Nemeton Mail konnte nicht starten");

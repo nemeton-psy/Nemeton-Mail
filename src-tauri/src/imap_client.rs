@@ -29,6 +29,8 @@ pub struct Folder {
     pub path: Vec<String>,
     pub unseen: u32,
     pub total: u32,
+    /// Trennzeichen für Unterordner (z.B. „.“ oder „/“).
+    pub delim: String,
 }
 
 #[derive(Serialize, Clone)]
@@ -149,7 +151,8 @@ impl MailClient {
                 _ => decode_utf7(leaf),
             };
             let path = id.split(delim).map(decode_utf7).collect();
-            out.push(Folder { id, name, role, depth, path, unseen: 0, total: 0 });
+            let delim = delim.to_string();
+            out.push(Folder { id, name, role, depth, path, unseen: 0, total: 0, delim });
         }
         drop(names);
         // Anzahl ungelesener Mails je Ordner abfragen.
@@ -316,6 +319,24 @@ impl MailClient {
         Ok(uids.len())
     }
 
+    /// Mehrere Mails in den Papierkorb (liegen sie schon dort: endgültig löschen).
+    pub fn delete_many(&mut self, folder: &str, uids: &[u32]) -> Result<usize, String> {
+        if self.read_only {
+            return Err(READ_ONLY_MSG.into());
+        }
+        let trash = self.list_folders()?.into_iter().find(|f| f.role == "trash").map(|f| f.id);
+        match trash {
+            Some(t) if t != folder => self.move_many(folder, uids, &t),
+            _ => {
+                self.select(folder)?;
+                let set = uids.iter().map(|u| u.to_string()).collect::<Vec<_>>().join(",");
+                self.session.uid_store(&set, "+FLAGS.SILENT (\\Deleted)").map_err(err)?;
+                self.session.uid_expunge(&set).map_err(err)?;
+                Ok(uids.len())
+            }
+        }
+    }
+
     /// Markiert die Mail als „beantwortet“.
     pub fn set_answered(&mut self, folder: &str, uid: u32) -> Result<(), String> {
         if self.read_only {
@@ -375,12 +396,146 @@ impl MailClient {
         }
         self.select(folder)?;
         let id = uid.to_string();
+        // Kennung der Mail merken, um nach einem Fehler nachzusehen,
+        // ob sie trotzdem angekommen ist.
+        let mid = self.message_id_of(uid);
         if self.session.uid_mv(&id, target).is_err() {
-            self.session.uid_copy(&id, target).map_err(err)?;
-            self.session.uid_store(&id, "+FLAGS.SILENT (\\Deleted)").map_err(err)?;
-            self.session.uid_expunge(&id).map_err(err)?;
+            let fallback = (|| -> Result<(), String> {
+                self.session.uid_copy(&id, target).map_err(err)?;
+                self.session.uid_store(&id, "+FLAGS.SILENT (\\Deleted)").map_err(err)?;
+                self.session.uid_expunge(&id).map_err(err)?;
+                Ok(())
+            })();
+            if let Err(e) = fallback {
+                self.selected = None;
+                if let Some(m) = &mid {
+                    if self.contains_message_id(target, m) {
+                        return Ok(());
+                    }
+                }
+                return Err(e);
+            }
+        }
+        self.selected = None;
+        Ok(())
+    }
+
+    /// Steht die Verbindung noch?
+    pub fn ping(&mut self) -> bool {
+        self.session.noop().is_ok()
+    }
+
+    fn message_id_of(&mut self, uid: u32) -> Option<String> {
+        let f = self.session.uid_fetch(uid.to_string(), "(UID BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])").ok()?;
+        let raw = f.iter().next()?.header()?.to_vec();
+        let (h, _) = mailparse::parse_headers(&raw).ok()?;
+        h.get_first_value("Message-ID").map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
+    }
+
+    /// Liegt eine Mail mit dieser Kennung im Ordner?
+    pub fn contains_message_id(&mut self, folder: &str, mid: &str) -> bool {
+        if self.session.examine(folder).is_err() {
+            return false;
+        }
+        self.selected = None;
+        let q = format!("HEADER Message-ID \"{}\"", mid.replace('\\', "").replace('"', ""));
+        self.session.uid_search(&q).map(|r| !r.is_empty()).unwrap_or(false)
+    }
+
+    /// Alle Mails im Ordner als gelesen markieren.
+    pub fn mark_all_read(&mut self, folder: &str) -> Result<(), String> {
+        if self.read_only {
+            return Err(READ_ONLY_MSG.into());
+        }
+        self.selected = None;
+        let mb = self.session.select(folder).map_err(err)?;
+        self.selected = Some(format!("false|{folder}"));
+        if mb.exists > 0 {
+            self.session.store("1:*", "+FLAGS.SILENT (\\Seen)").map_err(err)?;
         }
         Ok(())
+    }
+
+    /// Neuen Ordner anlegen. `parent`: Oberordner oder leer.
+    pub fn create_folder(&mut self, parent: &str, name: &str) -> Result<String, String> {
+        if self.read_only {
+            return Err(READ_ONLY_MSG.into());
+        }
+        let name = clean_folder_name(name)?;
+        let folders = self.list_folders()?;
+        let delim = folders.first().map(|f| f.delim.clone()).unwrap_or_else(|| ".".into());
+        if name.contains(&delim) {
+            return Err(format!("Das Zeichen „{delim}“ ist in Ordnernamen nicht erlaubt."));
+        }
+        let id = if parent.is_empty() { encode_utf7(&name) } else { format!("{parent}{delim}{}", encode_utf7(&name)) };
+        if folders.iter().any(|f| f.id == id) {
+            return Err("Diesen Ordner gibt es schon.".into());
+        }
+        self.session.create(&id).map_err(err)?;
+        let _ = self.session.subscribe(&id);
+        Ok(id)
+    }
+
+    /// Ordner umbenennen (bleibt an seiner Stelle).
+    pub fn rename_folder(&mut self, id: &str, name: &str) -> Result<String, String> {
+        if self.read_only {
+            return Err(READ_ONLY_MSG.into());
+        }
+        let name = clean_folder_name(name)?;
+        let folders = self.list_folders()?;
+        let f = folders.iter().find(|f| f.id == id).ok_or("Ordner nicht gefunden.")?;
+        if !f.role.is_empty() {
+            return Err("Systemordner wie Posteingang oder Papierkorb können nicht umbenannt werden.".into());
+        }
+        if name.contains(&f.delim) {
+            return Err(format!("Das Zeichen „{}“ ist in Ordnernamen nicht erlaubt.", f.delim));
+        }
+        let new_id = match id.rfind(f.delim.as_str()) {
+            Some(i) => format!("{}{}", &id[..i + f.delim.len()], encode_utf7(&name)),
+            None => encode_utf7(&name),
+        };
+        if folders.iter().any(|x| x.id == new_id) {
+            return Err("Einen Ordner mit diesem Namen gibt es schon.".into());
+        }
+        if self.selected.as_deref().map(|s| s.ends_with(id)).unwrap_or(false) {
+            let _ = self.session.close();
+            self.selected = None;
+        }
+        self.session.rename(id, &new_id).map_err(err)?;
+        let _ = self.session.unsubscribe(id);
+        let _ = self.session.subscribe(&new_id);
+        Ok(new_id)
+    }
+
+    /// Ordner löschen: Seine Mails kommen vorher in den Papierkorb.
+    pub fn delete_folder(&mut self, id: &str) -> Result<usize, String> {
+        if self.read_only {
+            return Err(READ_ONLY_MSG.into());
+        }
+        let folders = self.list_folders()?;
+        let f = folders.iter().find(|f| f.id == id).ok_or("Ordner nicht gefunden.")?;
+        if !f.role.is_empty() {
+            return Err("Systemordner wie Posteingang oder Papierkorb können nicht gelöscht werden.".into());
+        }
+        let prefix = format!("{id}{}", f.delim);
+        if folders.iter().any(|x| x.id.starts_with(&prefix)) {
+            return Err("Der Ordner hat Unterordner. Bitte diese zuerst löschen oder verschieben.".into());
+        }
+        let trash = folders.iter().find(|f| f.role == "trash").map(|f| f.id.clone()).ok_or("Kein Papierkorb gefunden.")?;
+        self.selected = None;
+        let mb = self.session.select(id).map_err(err)?;
+        let n = mb.exists as usize;
+        if n > 0 {
+            if self.session.mv("1:*", &trash).is_err() {
+                self.session.copy("1:*", &trash).map_err(err)?;
+                self.session.store("1:*", "+FLAGS.SILENT (\\Deleted)").map_err(err)?;
+                self.session.expunge().map_err(err)?;
+            }
+        }
+        let _ = self.session.close();
+        self.session.delete(id).map_err(err)?;
+        let _ = self.session.unsubscribe(id);
+        Ok(n)
     }
 
     /// Sucht in Absender, Betreff und Text. Ohne Ordner: in allen Ordnern
@@ -599,6 +754,57 @@ fn decode_utf7(s: &str) -> String {
     out
 }
 
+fn clean_folder_name(name: &str) -> Result<String, String> {
+    let n = name.trim();
+    if n.is_empty() {
+        return Err("Bitte einen Namen eingeben.".into());
+    }
+    if n.chars().any(|c| c.is_control() || c == '*' || c == '%') {
+        return Err("Der Name enthält ein nicht erlaubtes Zeichen.".into());
+    }
+    Ok(n.to_string())
+}
+
+/// Gegenstück zu `decode_utf7`: „Entwürfe“ → „Entw&APw-rfe“.
+fn encode_utf7(s: &str) -> String {
+    const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+,";
+    let mut out = String::new();
+    let mut pending: Vec<u16> = Vec::new();
+    let flush = |pending: &mut Vec<u16>, out: &mut String| {
+        if pending.is_empty() {
+            return;
+        }
+        let bytes: Vec<u8> = pending.iter().flat_map(|u| u.to_be_bytes()).collect();
+        out.push('&');
+        let mut buf = 0u32;
+        let mut bits = 0;
+        for b in bytes {
+            buf = (buf << 8) | b as u32;
+            bits += 8;
+            while bits >= 6 {
+                bits -= 6;
+                out.push(T[((buf >> bits) & 63) as usize] as char);
+            }
+        }
+        if bits > 0 {
+            out.push(T[((buf << (6 - bits)) & 63) as usize] as char);
+        }
+        out.push('-');
+        pending.clear();
+    };
+    for c in s.chars() {
+        if (' '..='~').contains(&c) {
+            flush(&mut pending, &mut out);
+            if c == '&' { out.push_str("&-") } else { out.push(c) }
+        } else {
+            let mut b = [0u16; 2];
+            pending.extend_from_slice(c.encode_utf16(&mut b));
+        }
+    }
+    flush(&mut pending, &mut out);
+    out
+}
+
 fn b64_decode(s: &str) -> Vec<u8> {
     const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut buf = 0u32;
@@ -626,6 +832,10 @@ mod tests {
         assert_eq!(decode_utf7("Entw&APw-rfe"), "Entwürfe");
         assert_eq!(decode_utf7("A&-B"), "A&B");
         assert_eq!(decode_utf7("Plain"), "Plain");
+        for t in ["Entwürfe", "A&B", "Bücher & Ähnliches", "日本", "Plain", "ü"] {
+            assert_eq!(decode_utf7(&encode_utf7(t)), t);
+        }
+        assert_eq!(encode_utf7("Entwürfe"), "Entw&APw-rfe");
     }
 
     #[test]

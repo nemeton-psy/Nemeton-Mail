@@ -66,44 +66,117 @@ function newCategory(name) {
 
 /* ---------- Leiste über der Liste ---------- */
 function catDot(c) { const d = document.createElement("span"); d.className = "cat-dot"; d.style.background = c.color; return d; }
+// Knopf „Filter“ neben „Abrufen“; die Kategorien stehen in einer
+// aufklappbaren Liste, damit es über der Mailliste ruhig bleibt.
 function renderCatBar() {
-  const bar = $("catbar");
-  if (!bar) return;
-  bar.innerHTML = "";
+  const btn = $("btn-filter");
+  if (!btn) return;
+  const cur = S.cat === "none" ? { name: "Ohne Kategorie" } : S.cat ? catById(S.cat) : null;
+  if (S.cat && !cur) S.cat = null;
+  btn.innerHTML = "";
+  if (cur?.color) btn.appendChild(catDot(cur));
+  const t = document.createElement("span"); t.textContent = cur ? cur.name : "Kategorien"; btn.appendChild(t);
+  const arrow = document.createElement("span"); arrow.className = "caret"; arrow.textContent = "▾"; btn.appendChild(arrow);
+  btn.classList.toggle("active", !!cur);
+  $("btn-filter-clear").hidden = !cur;
+  if (!$("catpanel").hidden) renderCatPanel();
+}
+function closeCatPanel() { $("catpanel").hidden = true; $("btn-filter").setAttribute("aria-expanded", "false"); }
+function renderCatPanel() {
+  const panel = $("catpanel");
+  panel.innerHTML = "";
   const list = cats();
   const mk = (id, label, count, color) => {
     const b = document.createElement("button");
     b.type = "button"; b.className = "catf"; b.setAttribute("aria-pressed", String((S.cat || null) === id));
-    if (color) b.appendChild(catDot({ color }));
-    const t = document.createElement("span"); t.textContent = label; b.appendChild(t);
+    const dot = catDot({ color: color || "transparent" }); if (!color) dot.classList.add("nodot"); b.appendChild(dot);
+    const t = document.createElement("span"); t.className = "catl"; t.textContent = label; b.appendChild(t);
     if (count != null) { const n = document.createElement("span"); n.className = "catn"; n.textContent = count; b.appendChild(n); }
-    b.onclick = () => { S.cat = S.cat === id ? null : id; render(); $("mails").focus(); };
+    b.onclick = () => { S.cat = id; closeCatPanel(); render(); $("mails").focus(); };
     if (id && id !== "none") {
-      b.title = `Nur „${label}“ zeigen. Mails hierher ziehen, um ihren Absender zuzuordnen.`;
+      b.title = `Nur „${label}“ zeigen. Du kannst auch Mails hierher ziehen, um ihren Absender zuzuordnen.`;
       b.addEventListener("dragover", (e) => { if (e.dataTransfer.types.includes("text/x-nemeton-mail")) { e.preventDefault(); b.classList.add("drop"); } });
       b.addEventListener("dragleave", () => b.classList.remove("drop"));
       b.addEventListener("drop", (e) => {
         e.preventDefault(); b.classList.remove("drop");
-        const m = find(e.dataTransfer.getData("text/x-nemeton-mail"));
-        if (m && addrOf(m) && !catsOf(m).includes(id)) toggleRule(addrOf(m), id);
+        const ms = e.dataTransfer.getData("text/x-nemeton-mail").split("\n").map(find).filter(Boolean);
+        assignMany(ms, id);
       });
     }
-    bar.appendChild(b);
+    panel.appendChild(b);
   };
-  mk(null, "Alle", null);
+  mk(null, "Alle Mails", S.list.length);
+  const sep = () => { const d = document.createElement("div"); d.className = "sep"; panel.appendChild(d); };
+  sep();
   for (const c of list) mk(c.id, c.name, S.list.filter((m) => catsOf(m).includes(c.id)).length, c.color);
   mk("none", "Ohne Kategorie", S.list.filter((m) => !catsOf(m).length).length);
-  const add = document.createElement("button");
-  add.type = "button"; add.className = "catf add"; add.textContent = "+ Kategorie"; add.title = "Neue Kategorie anlegen";
-  add.onclick = () => {
-    const box = document.createElement("span"); box.className = "catnew";
-    const inp = document.createElement("input"); inp.placeholder = "Name, z.B. Verein"; inp.maxLength = 30;
-    const ok = () => { const c = newCategory(inp.value); if (c) { S.cat = c.id; toast(`Kategorie „${c.name}“ angelegt. Ordne jetzt Absender per Rechtsklick oder Ziehen zu.`); } render(); };
-    inp.onkeydown = (e) => { if (e.key === "Enter") ok(); if (e.key === "Escape") render(); e.stopPropagation(); };
-    inp.onblur = () => setTimeout(() => { if (inp.isConnected) render(); }, 150);
-    box.appendChild(inp); add.replaceWith(box); inp.focus();
+  sep();
+  const add = document.createElement("div"); add.className = "catnew";
+  const inp = document.createElement("input"); inp.placeholder = "+ Neue Kategorie, z.B. Verein"; inp.maxLength = 30;
+  const ok = () => {
+    const c = newCategory(inp.value);
+    if (c) toast(`Kategorie „${c.name}“ angelegt. Ordne Absender per Rechtsklick → „Kategorie“ zu.`);
+    renderCatPanel(); renderCatBar();
   };
-  bar.appendChild(add);
+  inp.onkeydown = (e) => { if (e.key === "Enter") ok(); if (e.key === "Escape") closeCatPanel(); e.stopPropagation(); };
+  add.appendChild(inp); panel.appendChild(add);
+  const manage = document.createElement("button"); manage.type = "button"; manage.className = "catf manage"; manage.textContent = "Kategorien verwalten (Name, Farbe, löschen) …";
+  manage.onclick = () => { closeCatPanel(); $("btn-settings").click(); $("cat-settings")?.scrollIntoView({ block: "center" }); };
+  panel.appendChild(manage);
+}
+$("btn-filter").onclick = (e) => {
+  e.stopPropagation();
+  const p = $("catpanel");
+  if (!p.hidden) return closeCatPanel();
+  p.hidden = false; $("btn-filter").setAttribute("aria-expanded", "true");
+  renderCatPanel();
+  const r = $("btn-filter").getBoundingClientRect();
+  p.style.left = Math.min(r.left, innerWidth - p.offsetWidth - 8) + "px";
+  p.style.top = (r.bottom + 4) + "px";
+};
+$("btn-filter-clear").onclick = () => { S.cat = null; render(); };
+document.addEventListener("pointerdown", (e) => { if (!$("catpanel").hidden && !e.target.closest("#catpanel, #btn-filter")) closeCatPanel(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("catpanel").hidden) { e.stopPropagation(); closeCatPanel(); } }, true);
+
+// Absender mehrerer Mails einer Kategorie zuordnen (oder, wenn alle schon
+// drin sind, wieder herausnehmen).
+function assignMany(ms, id) {
+  const addrs = [...new Set(ms.map(addrOf).filter(Boolean))];
+  if (!addrs.length) return;
+  const r = catRules();
+  const allIn = addrs.every((a) => (r[a] || []).includes(id));
+  for (const a of addrs) {
+    const set = new Set(r[a] || []);
+    if (allIn) set.delete(id); else set.add(id);
+    if (set.size) r[a] = [...set]; else delete r[a];
+  }
+  saveCatRules(r);
+  const c = catById(id);
+  toast(allIn ? `${addrs.length === 1 ? addrs[0] : addrs.length + " Absender"} nicht mehr in „${c?.name}“.`
+              : `${addrs.length === 1 ? addrs[0] : addrs.length + " Absender"} jetzt in „${c?.name}“. Auch künftige Mails.`);
+  render();
+  if (S.msg) renderMsgCats(S.msg);
+}
+function addCatSubmenuMany(ms) {
+  const it = menuItem(menu, "Kategorie", null, { sub: true });
+  const sub = document.createElement("div");
+  sub.className = "menu sub"; sub.setAttribute("role", "menu");
+  const h = document.createElement("div"); h.className = "menu-h"; h.textContent = "Absender dieser Mails zuordnen"; sub.appendChild(h);
+  for (const c of cats()) {
+    const all = ms.every((m) => catsOf(m).includes(c.id));
+    const b = menuItem(sub, (all ? "✓ " : "") + c.name, () => assignMany(ms, c.id));
+    b.prepend(catDot(c));
+  }
+  it.appendChild(sub);
+  const open = () => {
+    sub.classList.add("show");
+    const r = it.getBoundingClientRect(), sr = sub.getBoundingClientRect();
+    sub.style.left = (r.right + sr.width > innerWidth ? -sr.width + 4 : r.width - 4) + "px";
+    sub.style.top = Math.min(0, innerHeight - r.top - sr.height - 8) + "px";
+  };
+  it.addEventListener("mouseenter", open);
+  it.addEventListener("click", (e) => { e.stopPropagation(); open(); });
+  it.addEventListener("mouseleave", () => sub.classList.remove("show"));
 }
 
 /* ---------- Schilder ---------- */

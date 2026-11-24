@@ -11,6 +11,8 @@ const S = {
   folder: "INBOX",
   list: [],          // aktuell angezeigte Mails
   cat: null,         // Kategorie-Filter (null = alle)
+  multi: new Set(),  // weitere markierte Mails (Mehrfachauswahl)
+  anchor: null,      // Startpunkt für Shift-Auswahl
   base: [],          // alle geladenen Mails des Ordners (für die Sofortsuche)
   sel: null,         // Schlüssel der ausgewählten Mail ("ordner|uid")
   opened: null,      // Schlüssel der geöffneten Mail
@@ -23,6 +25,20 @@ const S = {
 };
 const key = (m) => m.folder + "|" + m.uid;
 const find = (k) => S.list.find((m) => key(m) === k);
+// Alle markierten Mails (Mehrfachauswahl oder die eine ausgewählte).
+function selectedKeys() {
+  if (S.multi.size) return [...S.multi].filter((k) => find(k));
+  return S.sel && find(S.sel) ? [S.sel] : [];
+}
+const isSelected = (k) => k === S.sel || S.multi.has(k);
+function selectRange(toKey) {
+  const vl = viewList();
+  const a = vl.findIndex((m) => key(m) === (S.anchor || S.sel));
+  const b = vl.findIndex((m) => key(m) === toKey);
+  if (a < 0 || b < 0) { S.multi.clear(); return; }
+  S.multi = new Set(vl.slice(Math.min(a, b), Math.max(a, b) + 1).map(key));
+  if (S.multi.size < 2) S.multi.clear();
+}
 
 /* ---------- Hilfen ---------- */
 let toastT;
@@ -237,6 +253,7 @@ function renderFolders() {
     b.type = "button";
     b.className = "folder" + (f.id === S.folder && !isAllSearch() ? " on" : "");
     b.title = f.name;
+    b.dataset.id = f.id;
     b.style.paddingLeft = (0.6 + f.depth * 0.9) + "em";
     b.innerHTML = `<span class="dotf"></span><span class="ini"></span><span class="lbl"></span><span class="n"></span>`;
     b.querySelector(".ini").textContent = f.name.replace(/^[^\p{L}\p{N}]+/u, "").slice(0, 2);
@@ -253,8 +270,8 @@ function renderFolders() {
     b.addEventListener("drop", (e) => {
       e.preventDefault();
       b.classList.remove("drop");
-      const k = e.dataTransfer.getData("text/x-nemeton-mail");
-      if (k) moveMail(k, f.id);
+      const keys = e.dataTransfer.getData("text/x-nemeton-mail").split("\n").filter(Boolean);
+      if (keys.length) moveMany(keys, f.id);
     });
     box.appendChild(b);
   }
@@ -319,6 +336,12 @@ async function sortOutAds() {
     reloadList();
   } finally { adBusy = false; }
 }
+// Ordner „Werbung“ gleich beim Einschalten anlegen, damit man ihn sieht.
+async function ensureAdFolder() {
+  if (S.testMode || S.folders.some((f) => f.id === "Werbung")) return;
+  try { await invoke("create_folder", { parent: "", name: "Werbung" }); await loadFolders(); toast("Ordner „Werbung“ angelegt."); }
+  catch (err) { if (!String(err).includes("gibt es schon")) toast("Ordner „Werbung“ konnte nicht angelegt werden: " + err, true); }
+}
 function markSender(m, kind) {
   const addr = String(m.from_addr || "").toLowerCase();
   const keep = loadSet("adKeep"), senders = loadSet("adSenders"), domains = loadSet("adDomains");
@@ -334,7 +357,7 @@ $("ads-on").onchange = (e) => {
   store("adsOn", e.target.checked ? "1" : "0");
   if (e.target.checked) {
     if (S.testMode) toast("Werbung wird erkannt und markiert. Verschoben wird erst, wenn der Testmodus aus ist.");
-    sortOutAds();
+    else ensureAdFolder().then(sortOutAds);
   }
   render();
 };
@@ -455,8 +478,8 @@ function isSentFolder(id) {
 function row(m, showFolder) {
   const el = document.createElement("div");
   const k = key(m);
-  el.className = "mail" + (m.seen ? "" : " unread") + (k === S.sel ? " on" : "");
-  el.innerHTML = `<span class="from"></span><span class="fold"></span><span class="date"></span><span class="subj"></span>`;
+  el.className = "mail" + (m.seen ? "" : " unread") + (isSelected(k) ? " on" : "") + (k === S.sel && S.multi.size ? " cursor" : "");
+  el.innerHTML = `<span class="from"></span><span class="fold"></span><span class="date"></span><span class="subj"></span><span class="cats"></span>`;
   const sent = isSentFolder(m.folder);
   el.querySelector(".from").textContent = sent ? "An: " + (m.to || "(unbekannt)") : (m.from || m.from_addr || "(unbekannt)");
   el.querySelector(".from").title = sent ? m.to : m.from_addr;
@@ -470,7 +493,7 @@ function row(m, showFolder) {
     el.querySelector(".subj").prepend(t);
   }
   const ct = catTags(m);
-  if (ct) el.querySelector(".subj").prepend(ct);
+  if (ct) el.querySelector(".cats").appendChild(ct);
   if (m.has_att) {
     const a = document.createElement("span"); a.className = "clip"; a.textContent = "📎"; a.title = "Mit Anhang";
     el.querySelector(".subj").prepend(a);
@@ -479,12 +502,22 @@ function row(m, showFolder) {
     const t = document.createElement("span"); t.className = "tag"; t.textContent = folderName(m.folder);
     el.querySelector(".subj").prepend(t);
   }
-  el.onclick = () => { S.sel = k; render(); $("mails").focus(); };
+  el.onclick = (e) => {
+    if (e.shiftKey) { selectRange(k); S.sel = k; }
+    else if (e.metaKey || e.ctrlKey) {
+      if (!S.multi.size && S.sel && S.sel !== k) S.multi.add(S.sel);
+      if (S.multi.has(k)) S.multi.delete(k); else S.multi.add(k);
+      if (S.multi.size < 2) { S.multi.clear(); }
+      S.sel = k; S.anchor = k;
+    } else { S.sel = k; S.anchor = k; S.multi.clear(); }
+    render(); $("mails").focus();
+  };
   el.ondblclick = () => openMail(k);
   // Ziehen in einen Ordner
   el.draggable = true;
   el.addEventListener("dragstart", (e) => {
-    e.dataTransfer.setData("text/x-nemeton-mail", k);
+    const keys = isSelected(k) && S.multi.size ? selectedKeys() : [k];
+    e.dataTransfer.setData("text/x-nemeton-mail", keys.join("\n"));
     e.dataTransfer.effectAllowed = "move";
     el.classList.add("dragging");
   });
@@ -492,8 +525,10 @@ function row(m, showFolder) {
   // Rechtsklick-Menü
   el.addEventListener("contextmenu", (e) => {
     e.preventDefault();
-    S.sel = k; render();
-    showMenu(e.clientX, e.clientY, k);
+    if (!isSelected(k)) { S.sel = k; S.anchor = k; S.multi.clear(); }
+    render();
+    if (S.multi.size > 1) showMultiMenu(e.clientX, e.clientY);
+    else showMenu(e.clientX, e.clientY, k);
   });
   return el;
 }
@@ -805,41 +840,84 @@ function putBack({ m, i }) {
   render();
 }
 
-async function remove(k) {
-  const t = takeOut(k);
-  if (!t) return;
+// Nimmt mehrere Mails aus der Liste; die nächste danach wird ausgewählt.
+function takeOutMany(keys) {
+  const set = new Set(keys);
+  const vl = viewList();
+  const lastIdx = Math.max(...vl.map((m, i) => (set.has(key(m)) ? i : -1)));
+  const next = vl.slice(lastIdx + 1).find((m) => !set.has(key(m))) || [...vl].reverse().find((m) => !set.has(key(m)));
+  const wasOpen = set.has(S.opened);
+  const taken = S.list.filter((m) => set.has(key(m)));
+  S.list = S.list.filter((m) => !set.has(key(m)));
+  S.base = S.base.filter((m) => !set.has(key(m)));
+  for (const m of taken) if (!m.seen) bumpUnread(m.folder, -1);
+  S.multi.clear();
+  S.sel = next ? key(next) : null; S.anchor = S.sel;
+  if (wasOpen) S.opened = null;
+  render();
+  if (wasOpen && next) openMail(key(next));
+  return taken;
+}
+// Fasst Mails nach Ordner zusammen: {ordner: [uid, …]}
+function byFolder(mails) {
+  const g = {};
+  for (const m of mails) (g[m.folder] ||= []).push(m.uid);
+  return g;
+}
+const nMails = (n) => (n === 1 ? "1 Mail" : `${n} Mails`);
+
+async function remove(k) { return removeMany([k]); }
+async function removeMany(keys) {
+  const taken = takeOutMany(keys);
+  if (!taken.length) return;
   if (S.testMode) {
-    S.hidden.add(k);
-    toast("Testmodus: nur in der App ausgeblendet. Auf dem Server bleibt die Mail.");
+    for (const m of taken) S.hidden.add(key(m));
+    toast(`Testmodus: ${nMails(taken.length)} nur in der App ausgeblendet. Auf dem Server bleibt alles.`);
     return;
   }
   try {
-    await invoke("delete_message", { folder: t.m.folder, uid: t.m.uid });
-    toast("In den Papierkorb verschoben: " + (t.m.subject || "(kein Betreff)"));
-    loadFolders();
+    for (const [folder, uids] of Object.entries(byFolder(taken))) await invoke("delete_messages", { folder, uids });
+    toast(taken.length === 1 ? "In den Papierkorb verschoben: " + (taken[0].subject || "(kein Betreff)") : `${nMails(taken.length)} in den Papierkorb verschoben.`);
   } catch (err) {
-    putBack(t);
-    toast("Löschen fehlgeschlagen: " + err, true);
+    toast("Löschen fehlgeschlagen: " + err + " – die Liste wird neu geladen.", true);
+    await reloadList();
   }
+  loadFolders();
 }
 
-async function moveMail(k, target) {
-  const m = find(k);
-  if (!m || m.folder === target) return;
+async function moveMail(k, target) { return moveMany([k], target); }
+async function moveMany(keys, target) {
+  keys = keys.filter((k) => { const m = find(k); return m && m.folder !== target; });
+  if (!keys.length) return;
   const name = folderName(target);
-  const t = takeOut(k);
+  const taken = takeOutMany(keys);
   if (S.testMode) {
-    S.hidden.add(k);
-    toast(`Testmodus: nur in der App nach „${name}“ verschoben. Auf dem Server bleibt alles, wie es ist.`);
+    for (const m of taken) S.hidden.add(key(m));
+    toast(`Testmodus: ${nMails(taken.length)} nur in der App nach „${name}“ verschoben. Auf dem Server bleibt alles, wie es ist.`);
     return;
   }
   try {
-    await invoke("move_message", { folder: t.m.folder, uid: t.m.uid, target });
-    toast(`Verschoben nach „${name}“.`);
-    loadFolders();
+    for (const [folder, uids] of Object.entries(byFolder(taken))) {
+      if (uids.length === 1) await invoke("move_message", { folder, uid: uids[0], target });
+      else await invoke("move_messages", { folder, uids, target });
+    }
+    toast(`${nMails(taken.length)} nach „${name}“ verschoben.`);
   } catch (err) {
-    putBack(t);
-    toast("Verschieben fehlgeschlagen: " + err, true);
+    // Nicht raten: neu laden, damit die Liste zeigt, was wirklich passiert ist.
+    toast(`Verschieben nach „${name}“ fehlgeschlagen: ${err}. Die Liste wird neu geladen.`, true);
+    await reloadList();
+  }
+  loadFolders();
+}
+
+async function setSeenMany(keys, seen) {
+  const ms = keys.map(find).filter((m) => m && m.seen !== seen);
+  for (const m of ms) { m.seen = seen; bumpUnread(m.folder, seen ? -1 : 1); if (S.testMode) S.localSeen.set(key(m), seen); }
+  render();
+  if (S.testMode) return;
+  for (const m of ms) {
+    try { await invoke("set_seen", { folder: m.folder, uid: m.uid, seen }); }
+    catch (err) { toast("Konnte nicht geändert werden: " + err, true); break; }
   }
 }
 
@@ -853,6 +931,46 @@ async function composeFor(k, kind) {
 }
 
 /* ---------- Rechtsklick-Menü ---------- */
+function folderSubmenu(label, exclude, action) {
+  const mv = menuItem(menu, label, null, { sub: true });
+  const sub = document.createElement("div");
+  sub.className = "menu sub"; sub.setAttribute("role", "menu");
+  for (const f of S.folders) {
+    if (f.id === exclude) continue;
+    const b = menuItem(sub, f.name, () => action(f.id));
+    b.style.paddingLeft = (0.9 + f.depth * 0.9) + "em";
+  }
+  mv.appendChild(sub);
+  const openSub = () => {
+    sub.classList.add("show");
+    const r = mv.getBoundingClientRect(), sr = sub.getBoundingClientRect();
+    sub.style.left = (r.right + sr.width > innerWidth ? -sr.width + 4 : r.width - 4) + "px";
+    sub.style.top = Math.min(0, innerHeight - r.top - sr.height - 8) + "px";
+  };
+  mv.addEventListener("mouseenter", openSub);
+  mv.addEventListener("click", (e) => { e.stopPropagation(); openSub(); });
+  mv.addEventListener("mouseleave", () => sub.classList.remove("show"));
+}
+function placeMenu(x, y) {
+  menu.hidden = false;
+  const r = menu.getBoundingClientRect();
+  menu.style.left = Math.min(x, innerWidth - r.width - 8) + "px";
+  menu.style.top = Math.max(8, Math.min(y, innerHeight - r.height - 8)) + "px";
+}
+// Menü für mehrere markierte Mails
+function showMultiMenu(x, y) {
+  const keys = selectedKeys();
+  menu.innerHTML = "";
+  const h = document.createElement("div"); h.className = "menu-h"; h.textContent = `${keys.length} Mails markiert`; menu.appendChild(h);
+  menuItem(menu, "Als gelesen markieren", () => setSeenMany(keys, true));
+  menuItem(menu, "Als ungelesen markieren", () => setSeenMany(keys, false));
+  addCatSubmenuMany(keys.map(find).filter(Boolean));
+  const sep = document.createElement("div"); sep.className = "sep"; menu.appendChild(sep);
+  folderSubmenu("Verschieben in", null, (id) => moveMany(keys, id));
+  const sep2 = document.createElement("div"); sep2.className = "sep"; menu.appendChild(sep2);
+  menuItem(menu, `${nMails(keys.length)} löschen`, () => removeMany(keys), { danger: true });
+  placeMenu(x, y);
+}
 const menu = document.createElement("div");
 menu.className = "menu"; menu.hidden = true; menu.setAttribute("role", "menu");
 document.body.appendChild(menu);
@@ -878,24 +996,7 @@ function showMenu(x, y, k) {
   menuItem(menu, "Allen antworten", () => composeFor(k, "all"));
   menuItem(menu, "Weiterleiten", () => composeFor(k, "forward"));
   const sep = document.createElement("div"); sep.className = "sep"; menu.appendChild(sep);
-  const mv = menuItem(menu, "Verschieben in", null, { sub: true });
-  const sub = document.createElement("div");
-  sub.className = "menu sub"; sub.setAttribute("role", "menu");
-  for (const f of S.folders) {
-    if (f.id === m.folder) continue;
-    const b = menuItem(sub, f.name, () => moveMail(k, f.id));
-    b.style.paddingLeft = (0.9 + f.depth * 0.9) + "em";
-  }
-  mv.appendChild(sub);
-  const openSub = () => {
-    sub.classList.add("show");
-    const r = mv.getBoundingClientRect(), sr = sub.getBoundingClientRect();
-    sub.style.left = (r.right + sr.width > innerWidth ? -sr.width + 4 : r.width - 4) + "px";
-    sub.style.top = Math.min(0, innerHeight - r.top - sr.height - 8) + "px";
-  };
-  mv.addEventListener("mouseenter", openSub);
-  mv.addEventListener("click", (e) => { e.stopPropagation(); openSub(); });
-  mv.addEventListener("mouseleave", () => sub.classList.remove("show"));
+  folderSubmenu("Verschieben in", m.folder, (id) => moveMail(k, id));
   const sepA = document.createElement("div"); sepA.className = "sep"; menu.appendChild(sepA);
   if (m.from_addr) {
     const dom = domainOf(m.from_addr);
@@ -926,29 +1027,41 @@ $("mails").addEventListener("wheel", (e) => {
 
 /* ---------- Tastatur ---------- */
 $("mails").addEventListener("keydown", (e) => {
-  if (e.metaKey || e.ctrlKey || e.altKey) return;
   const vl = viewList();
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a") {
+    e.preventDefault();
+    S.multi = new Set(vl.map(key)); if (S.multi.size < 2) S.multi.clear();
+    render(); return;
+  }
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
   const i = vl.findIndex((m) => key(m) === S.sel);
   const move = (d) => {
     const n = vl[Math.min(Math.max(i + d, 0), vl.length - 1)];
     if (!n) return;
-    S.sel = key(n);
-    if (S.opened !== null) openMail(S.sel); else render();
+    if (e.shiftKey) {
+      // Shift + Pfeil: Auswahl erweitern, nichts öffnen
+      if (!S.anchor || !find(S.anchor)) S.anchor = S.sel;
+      S.sel = key(n);
+      selectRange(S.sel);
+      render(); return;
+    }
+    S.sel = key(n); S.anchor = S.sel; S.multi.clear();
+    if (S.opened !== null && S.opened !== "compose") openMail(S.sel); else render();
   };
   switch (e.key) {
     case "ArrowDown": e.preventDefault(); move(1); break;
     case "ArrowUp": e.preventDefault(); move(-1); break;
     case "Enter": if (S.sel) openMail(S.sel); break;
-    case "Delete": e.preventDefault(); if (S.sel) remove(S.sel); break;
+    case "Delete": e.preventDefault(); if (S.sel || S.multi.size) removeMany(selectedKeys()); break;
     case "Backspace":
-    case "Escape": e.preventDefault(); if (S.opened !== null) closeMail(); break;
+    case "Escape": e.preventDefault(); if (S.multi.size) { S.multi.clear(); render(); } else if (S.opened !== null) closeMail(); break;
   }
 });
 // Rücktaste/Esc auch, wenn der Fokus im Lesebereich liegt.
 document.addEventListener("keydown", (e) => {
   if (S.opened === null || S.compose || e.target.closest?.("input, textarea, select, [contenteditable], #mails")) return;
   if (e.key === "Backspace" || e.key === "Escape") { e.preventDefault(); closeMail(); }
-  if (e.key === "Delete") { e.preventDefault(); remove(S.opened); }
+  if (e.key === "Delete") { e.preventDefault(); if (S.opened !== "compose") remove(S.opened); }
 });
 
 /* ---------- Leiste unten links ---------- */
