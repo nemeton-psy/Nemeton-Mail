@@ -19,7 +19,11 @@ const KEYRING_SERVICE: &str = "nemeton-mail";
 
 #[derive(Default)]
 struct AppState {
+    /// Verbindung für alles, was du direkt tust (öffnen, löschen, verschieben …).
     client: Mutex<Option<MailClient>>,
+    /// Zweite Verbindung für den Abgleich im Hintergrund (Ordnerzahlen,
+    /// neue Mails). So muss Löschen oder Verschieben nie darauf warten.
+    bg: Mutex<Option<MailClient>>,
     /// Zuletzt gewählter Ordner beim Sichern von Anhängen.
     save_dir: Mutex<Option<PathBuf>>,
 }
@@ -83,21 +87,37 @@ fn with_client<T>(
     state: &AppState,
     f: impl Fn(&mut MailClient) -> Result<T, String>,
 ) -> Result<T, String> {
-    let mut guard = state.client.lock().map_err(|_| "Interner Fehler".to_string())?;
+    with_conn(app, &state.client, f)
+}
+
+fn with_conn<T>(
+    app: &tauri::AppHandle,
+    slot: &Mutex<Option<MailClient>>,
+    f: impl Fn(&mut MailClient) -> Result<T, String>,
+) -> Result<T, String> {
+    let mut guard = slot.lock().map_err(|_| "Interner Fehler".to_string())?;
     let read_only = test_mode(app);
     // Erst prüfen, ob die Verbindung noch steht, und sonst neu verbinden.
     // Der eigentliche Befehl läuft dann genau einmal. (Früher wurde er bei
     // einem Fehler wiederholt – beim Verschieben konnte das Mails doppelt
     // bewegen oder einen Fehler melden, obwohl es geklappt hatte.)
-    let alive = guard.as_mut().map(|c| c.ping()).unwrap_or(false);
+    // Gerade erst benutzt: dann steht sie sicher noch (spart eine Rückfrage).
+    let alive = guard
+        .as_mut()
+        .map(|c| c.last_ok.elapsed().as_secs() < 20 || c.ping())
+        .unwrap_or(false);
     if !alive {
         *guard = Some(connect_saved(app)?);
     }
     let c = guard.as_mut().unwrap();
     c.read_only = read_only;
     let res = f(c);
-    if res.is_err() && !c.ping() {
+    if res.is_ok() {
+        c.last_ok = std::time::Instant::now();
+    } else if !c.ping() {
         *guard = None; // beim nächsten Mal neu verbinden
+    } else {
+        c.last_ok = std::time::Instant::now();
     }
     res
 }
@@ -133,6 +153,7 @@ async fn save_account(
     std::fs::write(account_path(&app)?, serde_json::to_string_pretty(&file).unwrap())
         .map_err(|e| e.to_string())?;
     *state.client.lock().unwrap() = Some(client);
+    *state.bg.lock().unwrap() = None;
     Ok(())
 }
 
@@ -261,7 +282,7 @@ async fn send_mail(app: tauri::AppHandle, draft: Draft) -> Result<String, String
     // Kopie in „Gesendet“ ablegen und die beantwortete Mail markieren.
     let answered = draft.answered;
     let saved = blocking(app, move |c| {
-        let sent = c.list_folders()?.into_iter().find(|f| f.role == "sent").map(|f| f.id);
+        let sent = c.folder_names()?.into_iter().find(|f| f.role == "sent").map(|f| f.id);
         if let Some(r) = &answered {
             let _ = c.set_answered(&r.folder, r.uid);
         }
@@ -404,6 +425,7 @@ fn logout(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), Strin
     }
     let _ = std::fs::remove_file(account_path(&app)?);
     *state.client.lock().unwrap() = None;
+    *state.bg.lock().unwrap() = None;
     Ok(())
 }
 
@@ -421,14 +443,37 @@ async fn blocking<T: Send + 'static>(
     .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
-async fn list_folders(app: tauri::AppHandle) -> Result<Vec<Folder>, String> {
-    blocking(app, |c| c.list_folders()).await
+/// Wie `blocking`, aber über die Hintergrund-Verbindung.
+async fn blocking_bg<T: Send + 'static>(
+    app: tauri::AppHandle,
+    f: impl Fn(&mut MailClient) -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        with_conn(&app, &state.bg, f)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-async fn list_messages(app: tauri::AppHandle, folder: String, limit: Option<usize>) -> Result<Vec<Summary>, String> {
-    blocking(app, move |c| c.list_messages(&folder, limit.unwrap_or(300))).await
+async fn list_folders(app: tauri::AppHandle) -> Result<Vec<Folder>, String> {
+    blocking_bg(app, |c| c.list_folders()).await
+}
+
+#[tauri::command]
+async fn list_messages(
+    app: tauri::AppHandle,
+    folder: String,
+    limit: Option<usize>,
+    background: Option<bool>,
+) -> Result<Vec<Summary>, String> {
+    let limit = limit.unwrap_or(300);
+    if background.unwrap_or(false) {
+        blocking_bg(app, move |c| c.list_messages(&folder, limit)).await
+    } else {
+        blocking(app, move |c| c.list_messages(&folder, limit)).await
+    }
 }
 
 #[tauri::command]
@@ -492,11 +537,18 @@ async fn search(app: tauri::AppHandle, query: String, folder: Option<String>) ->
     blocking(app, move |c| c.search(&query, folder.as_deref())).await
 }
 
+fn window_flags() -> tauri_plugin_window_state::StateFlags {
+    use tauri_plugin_window_state::StateFlags;
+    StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED | StateFlags::FULLSCREEN
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // Fenstergröße, Position und Bildschirm merken und beim Start wiederherstellen.
+        .plugin(tauri_plugin_window_state::Builder::default().with_state_flags(window_flags()).build())
         .manage(AppState::default())
         .setup(|app| {
             // Das Hauptfenster wird hier gebaut, damit Links aus Mails nie im
@@ -519,6 +571,10 @@ pub fn run() {
                     false
                 })
                 .build()?;
+            if let Some(w) = app.get_webview_window("main") {
+                use tauri_plugin_window_state::WindowExt;
+                let _ = w.restore_state(window_flags());
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

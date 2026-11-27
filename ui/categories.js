@@ -35,9 +35,28 @@ const catById = (id) => cats().find((c) => c.id === id);
 
 // Gefilterte Ansicht der Liste (S.cat: null = alle, "none" = ohne, sonst ID)
 function viewList() {
-  if (!S.cat) return S.list;
-  if (S.cat === "none") return S.list.filter((m) => !catsOf(m).length);
-  return S.list.filter((m) => catsOf(m).includes(S.cat));
+  let l = S.list;
+  // „Nur ungelesene“: Mails, die man gerade gelesen hat, bleiben sichtbar,
+  // bis man den Ordner wechselt – sonst würden sie beim Lesen verschwinden.
+  if (unreadOnly() && !S.query) l = l.filter((m) => !m.seen || S.keepShown.has(key(m)));
+  if (!S.cat) return l;
+  if (S.cat === "none") return l.filter((m) => !catsOf(m).length);
+  return l.filter((m) => catsOf(m).includes(S.cat));
+}
+// Pro Ordner gemerkt, ob nur ungelesene Mails gezeigt werden.
+const unreadOnly = () => load("unreadOnly:" + S.folder) === "1";
+function setUnreadOnly(on) {
+  store("unreadOnly:" + S.folder, on ? "1" : "0");
+  S.keepShown.clear();
+  render();
+}
+function renderUnreadBtn() {
+  const b = $("btn-unread");
+  if (!b) return;
+  const on = unreadOnly();
+  b.setAttribute("aria-pressed", String(on));
+  b.classList.toggle("active", on);
+  b.hidden = !!S.query;
 }
 
 function toggleRule(target, id) {
@@ -69,6 +88,7 @@ function catDot(c) { const d = document.createElement("span"); d.className = "ca
 // Knopf „Filter“ neben „Abrufen“; die Kategorien stehen in einer
 // aufklappbaren Liste, damit es über der Mailliste ruhig bleibt.
 function renderCatBar() {
+  renderUnreadBtn();
   const btn = $("btn-filter");
   if (!btn) return;
   const cur = S.cat === "none" ? { name: "Ohne Kategorie" } : S.cat ? catById(S.cat) : null;
@@ -285,4 +305,5 @@ function renderCatSettings() {
 }
 $("btn-settings").addEventListener("click", renderCatSettings);
 
-start().catch((err) => showSetup(String(err)));
+start().catch((err) => showSetup(String(err)));$("btn-unread").onclick = () => { setUnreadOnly(!unreadOnly()); $("mails").focus(); };
+

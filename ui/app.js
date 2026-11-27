@@ -22,6 +22,8 @@ const S = {
   testMode: false,   // den Testmodus gibt es nicht mehr; alles geht an den Server
   hidden: new Set(), // im Testmodus "gelöschte" Mails (nur in der App ausgeblendet)
   localSeen: new Map(), // im Testmodus geänderter Gelesen-Status
+  keepShown: new Set(), // bei „Nur ungelesene“: gerade gelesene Mails bleiben sichtbar
+  gone: new Map(),      // gelöschte/verschobene Mails → Zeitpunkt (damit sie nicht wieder auftauchen)
 };
 const key = (m) => m.folder + "|" + m.uid;
 const find = (k) => S.list.find((m) => key(m) === k);
@@ -214,13 +216,21 @@ $("setup-form").addEventListener("submit", async (e) => {
 });
 
 /* ---------- Ordner ---------- */
-async function loadFolders() {
+let foldersToken = 0;
+async function loadFolders({ quiet = false } = {}) {
+  const token = ++foldersToken;
   try {
-    S.folders = sortFolders(await invoke("list_folders"));
+    const list = sortFolders(await invoke("list_folders"));
+    if (token !== foldersToken) return;
+    S.folders = list;
   } catch (err) {
-    toast("Ordner konnten nicht geladen werden: " + err, true);
+    if (!quiet) toast("Ordner konnten nicht geladen werden: " + err, true);
   }
   renderFolders();
+  if (!quiet) return;
+  // Zähler oben aktualisieren, ohne die Liste neu aufzubauen
+  const f = S.folders.find((x) => x.id === S.folder);
+  if (f && !S.query) $("sum").textContent = `${f.unseen} ungelesen · ${f.total} Nachrichten`;
 }
 
 // Systemordner (Posteingang, Entwürfe, …) bleiben oben in fester Reihenfolge.
@@ -279,6 +289,7 @@ function renderFolders() {
 
 async function openFolder(id) {
   S.folder = id;
+  S.keepShown.clear();
   S.opened = null;
   S.query = ""; $("q").value = "";
   renderFolders();
@@ -286,18 +297,43 @@ async function openFolder(id) {
   $("mails").focus();
 }
 
-async function reloadList() {
-  $("ftitle").textContent = folderName(S.folder);
-  if (!S.list.length) $("mails").innerHTML = `<div class="empty">Lade Nachrichten …</div>`;
+// Gelöschte oder verschobene Mails merken, bis der Server es sicher
+// bestätigt hat. Eine Liste, die der Server kurz vorher geschickt hat,
+// enthält sie sonst noch – und sie tauchten plötzlich wieder auf.
+function markGone(keys) { const t = Date.now(); for (const k of keys) S.gone.set(k, t); }
+function unmarkGone(keys) { for (const k of keys) S.gone.delete(k); }
+function dropGone(list) {
+  const old = Date.now() - 10 * 60000;
+  for (const [k, t] of S.gone) if (t < old) S.gone.delete(k);
+  return S.gone.size ? list.filter((m) => !S.gone.has(key(m))) : list;
+}
+
+let listToken = 0;
+async function reloadList({ quiet = false } = {}) {
+  const folder = S.folder;
+  const token = ++listToken;
+  $("ftitle").textContent = folderName(folder);
+  if (!S.list.length && !quiet) $("mails").innerHTML = `<div class="empty">Lade Nachrichten …</div>`;
+  let list;
   try {
-    S.list = applyLocal(await invoke("list_messages", { folder: S.folder, limit: 300 }));
-    S.base = S.list.slice();
-    sortOutAds();
+    list = await invoke("list_messages", { folder, limit: 300, background: quiet });
   } catch (err) {
-    S.list = [];
+    if (token !== listToken || folder !== S.folder) return;
+    if (quiet) return; // beim stillen Abgleich die Liste einfach stehen lassen
+    S.list = []; S.base = [];
     toast("Nachrichten konnten nicht geladen werden: " + err, true);
+    render();
+    return;
   }
+  // Inzwischen anderer Ordner oder neueres Laden gestartet: Ergebnis verwerfen.
+  if (token !== listToken || folder !== S.folder || S.query) return;
+  // Was in der App schon als gelesen markiert ist, bleibt gelesen.
+  const seenHere = new Set(S.list.filter((m) => m.seen).map(key));
+  S.list = applyLocal(dropGone(list)).map((m) => (!m.seen && seenHere.has(key(m)) && S.keepShown.has(key(m)) ? { ...m, seen: true } : m));
+  S.base = S.list.slice();
+  sortOutAds();
   if (!find(S.sel)) S.sel = S.list[0] ? key(S.list[0]) : null;
+  for (const k of [...S.multi]) if (!find(k)) S.multi.delete(k);
   render();
 }
 
@@ -322,6 +358,7 @@ async function sortOutAds() {
   if (!ads.length) return;
   adBusy = true;
   const keys = new Set(ads.map(key));
+  markGone(keys);
   S.list = S.list.filter((m) => !keys.has(key(m)));
   S.base = S.base.filter((m) => !keys.has(key(m)));
   if (keys.has(S.sel)) S.sel = S.list[0] ? key(S.list[0]) : null;
@@ -330,9 +367,10 @@ async function sortOutAds() {
   try {
     const n = await invoke("sort_ads", { folder: inbox, uids: ads.map((m) => m.uid) });
     toast(n === 1 ? "1 Werbemail in den Ordner „Werbung“ verschoben." : `${n} Werbemails in den Ordner „Werbung“ verschoben.`);
-    await loadFolders();
+    refreshFoldersSoon();
   } catch (err) {
     toast("Werbung konnte nicht verschoben werden: " + err, true);
+    unmarkGone(keys);
     reloadList();
   } finally { adBusy = false; }
 }
@@ -467,6 +505,7 @@ function render() {
   }
   $("main").classList.toggle("open", S.opened !== null);
   $("main").classList.toggle("wide", S.opened === null || S.view === "bottom");
+  $("main").classList.toggle("all", all);
   box.querySelector(".mail.on")?.scrollIntoView({ block: "nearest" });
 }
 
@@ -550,7 +589,7 @@ function bumpUnread(folder, delta) {
 
 async function toggleSeen(m) {
   const seen = !m.seen;
-  m.seen = seen; bumpUnread(m.folder, seen ? -1 : 1); render();
+  m.seen = seen; if (seen) S.keepShown.add(key(m)); bumpUnread(m.folder, seen ? -1 : 1); render();
   if (S.testMode) { S.localSeen.set(key(m), seen); return; }
   try { await invoke("set_seen", { folder: m.folder, uid: m.uid, seen }); }
   catch (err) { m.seen = !seen; bumpUnread(m.folder, seen ? 1 : -1); render(); toast("Konnte nicht geändert werden: " + err, true); }
@@ -561,7 +600,7 @@ async function openMail(k) {
   const m = find(k);
   if (!m || !leaveCompose()) return;
   S.sel = k; S.opened = k;
-  if (!m.seen) { m.seen = true; bumpUnread(m.folder, -1); if (S.testMode) S.localSeen.set(k, true); }
+  if (!m.seen) { m.seen = true; S.keepShown.add(k); bumpUnread(m.folder, -1); if (S.testMode) S.localSeen.set(k, true); }
   render();
   const token = ++openToken;
   $("read").innerHTML = `<div class="loading">Lade Nachricht …</div>`;
@@ -814,6 +853,7 @@ function takeOutMany(keys) {
   const next = vl.slice(lastIdx + 1).find((m) => !set.has(key(m))) || [...vl].reverse().find((m) => !set.has(key(m)));
   const wasOpen = set.has(S.opened);
   const taken = S.list.filter((m) => set.has(key(m)));
+  markGone(taken.map(key));
   S.list = S.list.filter((m) => !set.has(key(m)));
   S.base = S.base.filter((m) => !set.has(key(m)));
   for (const m of taken) if (!m.seen) bumpUnread(m.folder, -1);
@@ -846,9 +886,10 @@ async function removeMany(keys) {
     toast(taken.length === 1 ? "In den Papierkorb verschoben: " + (taken[0].subject || "(kein Betreff)") : `${nMails(taken.length)} in den Papierkorb verschoben.`);
   } catch (err) {
     toast("Löschen fehlgeschlagen: " + err + " – die Liste wird neu geladen.", true);
+    unmarkGone(taken.map(key));
     await reloadList();
   }
-  loadFolders();
+  refreshFoldersSoon();
 }
 
 async function moveMail(k, target) { return moveMany([k], target); }
@@ -871,14 +912,15 @@ async function moveMany(keys, target) {
   } catch (err) {
     // Nicht raten: neu laden, damit die Liste zeigt, was wirklich passiert ist.
     toast(`Verschieben nach „${name}“ fehlgeschlagen: ${err}. Die Liste wird neu geladen.`, true);
+    unmarkGone(taken.map(key));
     await reloadList();
   }
-  loadFolders();
+  refreshFoldersSoon();
 }
 
 async function setSeenMany(keys, seen) {
   const ms = keys.map(find).filter((m) => m && m.seen !== seen);
-  for (const m of ms) { m.seen = seen; bumpUnread(m.folder, seen ? -1 : 1); if (S.testMode) S.localSeen.set(key(m), seen); }
+  for (const m of ms) { m.seen = seen; if (seen) S.keepShown.add(key(m)); bumpUnread(m.folder, seen ? -1 : 1); if (S.testMode) S.localSeen.set(key(m), seen); }
   render();
   if (S.testMode) return;
   for (const m of ms) {
@@ -1030,6 +1072,39 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Delete") { e.preventDefault(); if (S.opened !== "compose") remove(S.opened); }
 });
 
+// Klick in den Inhalt einer Mail: Die Mail liegt in einem abgeschotteten
+// Rahmen, der Tastendrücke nicht an die App weitergibt. Deshalb holt die App
+// den Tastatur-Fokus gleich zurück, damit Entf, Pfeiltasten und Rücktaste
+// weiter funktionieren – auch wenn man aus einem anderen Fenster direkt in
+// die Mail klickt. Markierter Text lässt sich trotzdem kopieren.
+const readFrame = () => document.querySelector("#read .read-body iframe");
+function reclaimFocus() {
+  const a = document.activeElement;
+  if (a && a.tagName === "IFRAME" && a === readFrame() && !S.compose) $("mails").focus({ preventScroll: true });
+}
+addEventListener("blur", () => setTimeout(reclaimFocus, 0));
+setInterval(() => { if (document.hasFocus()) reclaimFocus(); }, 400);
+document.addEventListener("keydown", (e) => {
+  const f = readFrame();
+  if (!f || S.compose || e.target.closest?.("input, textarea, select, [contenteditable]")) return;
+  const win = f.contentWindow;
+  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "c") {
+    const text = win?.getSelection()?.toString();
+    if (!text) return;
+    e.preventDefault();
+    const fallback = () => { try { f.contentDocument.execCommand("copy"); } catch {} };
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).catch(fallback); else fallback();
+    return;
+  }
+  // Blättern in der geöffneten Mail
+  if (e.key === "PageDown" || e.key === "PageUp" || (e.key === " " && e.target.id === "mails")) {
+    if (!win) return;
+    e.preventDefault();
+    const dir = e.key === "PageUp" || (e.key === " " && e.shiftKey) ? -1 : 1;
+    win.scrollBy({ top: dir * win.innerHeight * 0.85, behavior: "smooth" });
+  }
+}, true);
+
 /* ---------- Leiste unten links ---------- */
 $("t-auto").onclick = () => applyTheme("auto");
 $("t-dark").onclick = () => applyTheme("dark");
@@ -1061,8 +1136,12 @@ let syncBusy = false, lastSync = Date.now();
 async function syncNow() {
   if (syncBusy || $("app").hidden || S.query) return;
   syncBusy = true; lastSync = Date.now();
-  try { await loadFolders(); await reloadList(); } catch {} finally { syncBusy = false; }
+  try { await reloadList({ quiet: true }); await loadFolders({ quiet: true }); } catch {} finally { syncBusy = false; }
 }
+// Nach Löschen/Verschieben die Ordnerzahlen einmal kurz danach auffrischen,
+// nicht nach jeder einzelnen Aktion (das bremste schnelles Aufräumen).
+let foldersT;
+function refreshFoldersSoon() { clearTimeout(foldersT); foldersT = setTimeout(() => loadFolders({ quiet: true }), 4000); }
 setInterval(syncNow, 60000);
 addEventListener("focus", () => { if (Date.now() - lastSync > 15000) syncNow(); });
 document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - lastSync > 15000) syncNow(); });

@@ -140,14 +140,19 @@ body.dragging iframe { pointer-events: none; }
 .mail.unread .subj { font-weight: 600; }
 .mail.unread .date { color: var(--accent); font-weight: 600; }
 
-/* Breite Übersicht ohne Lesebereich: Spalten Von/An | Ordner | Betreff | Datum */
+/* Breite Übersicht ohne Lesebereich: Spalten Von/An | Betreff | Datum | Kategorie */
 @media (min-width: 1000px) {
-  .main.wide .cols { display: grid; grid-template-columns: 16rem 10rem minmax(0, 1fr) 9rem 10rem; gap: .3em .8em; padding: .55em 1.2em .55em 1.9em; background: var(--panel-2); }
+  .main.wide .cols { display: grid; grid-template-columns: 16rem minmax(0, 1fr) 9rem 10rem; gap: .3em .8em; padding: .55em 1.2em .55em 1.9em; background: var(--panel-2); }
+  .main.wide .cols .c-fold { display: none; }
+  .main.wide.all .cols { grid-template-columns: 16rem 10rem minmax(0, 1fr) 9rem 10rem; }
+  .main.wide.all .cols .c-fold { display: block; }
   .main.wide .cols span { font-size: .75em; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
   .main.wide .cols .c-date { text-align: right; }
-  .main.wide .mail { grid-template-columns: 16rem 10rem minmax(0, 1fr) 9rem 10rem; grid-template-areas: "who fold subj date cats"; padding-block: .85em; }
-  .main.wide .mail .fold { display: block; }
-  .main.wide .mail .subj .tag { display: none; }
+  .main.wide .mail { grid-template-columns: 16rem minmax(0, 1fr) 9rem 10rem; grid-template-areas: "who subj date cats"; padding-block: .85em; }
+  /* Die Ordner-Spalte gibt es nur bei der Suche in allen Ordnern. */
+  .main.wide.all .mail { grid-template-columns: 16rem 10rem minmax(0, 1fr) 9rem 10rem; grid-template-areas: "who fold subj date cats"; }
+  .main.wide.all .mail .fold { display: block; }
+  .main.wide.all .mail .subj .tag { display: none; }
   .main.wide .mail.unread::after { top: 50%; transform: translateY(-50%); }
   .main.wide .list > .mails { border-top-width: 1px; }
   .main.wide .cols { border-top: 3px solid var(--line-strong); }

@@ -97,6 +97,8 @@ pub struct MailClient {
     /// BODY.PEEK geladen, und Löschen oder Markieren wird abgelehnt.
     /// So ändert sich auf dem Server garantiert nichts.
     pub read_only: bool,
+    /// Wann die Verbindung zuletzt erfolgreich benutzt wurde.
+    pub last_ok: std::time::Instant,
 }
 
 const READ_ONLY_MSG: &str = "Testmodus ist an: Auf dem Server wird nichts geändert.";
@@ -113,7 +115,7 @@ impl MailClient {
         let session = client
             .login(&acc.email, &acc.password)
             .map_err(|_| "Anmeldung fehlgeschlagen. Bitte E-Mail-Adresse und Passwort prüfen.".to_string())?;
-        Ok(Self { session, selected: None, read_only: true })
+        Ok(Self { session, selected: None, read_only: true, last_ok: std::time::Instant::now() })
     }
 
     fn select(&mut self, folder: &str) -> Result<(), String> {
@@ -129,7 +131,31 @@ impl MailClient {
         Ok(())
     }
 
+    /// Alle Ordner mit Anzahl ungelesener und aller Mails. Das fragt jeden
+    /// Ordner einzeln ab und dauert bei vielen Ordnern etwas – deshalb nur
+    /// für die Ordnerleiste, nicht beim Löschen oder Verschieben.
     pub fn list_folders(&mut self) -> Result<Vec<Folder>, String> {
+        let mut out = self.folder_names()?;
+        for f in out.iter_mut() {
+            if self.session.status(&f.id, "(MESSAGES UNSEEN)").is_ok() {
+                while let Ok(resp) = self.session.unsolicited_responses.try_recv() {
+                    if let UnsolicitedResponse::Status { attributes, .. } = resp {
+                        for a in attributes {
+                            match a {
+                                StatusAttribute::Messages(m) => f.total = m,
+                                StatusAttribute::Unseen(u) => f.unseen = u,
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Nur die Ordner selbst (eine einzige, schnelle Abfrage).
+    pub fn folder_names(&mut self) -> Result<Vec<Folder>, String> {
         let names = self.session.list(Some(""), Some("*")).map_err(err)?;
         let mut out = Vec::new();
         for n in names.iter() {
@@ -155,22 +181,6 @@ impl MailClient {
             out.push(Folder { id, name, role, depth, path, unseen: 0, total: 0, delim });
         }
         drop(names);
-        // Anzahl ungelesener Mails je Ordner abfragen.
-        for f in out.iter_mut() {
-            if self.session.status(&f.id, "(MESSAGES UNSEEN)").is_ok() {
-                while let Ok(resp) = self.session.unsolicited_responses.try_recv() {
-                    if let UnsolicitedResponse::Status { attributes, .. } = resp {
-                        for a in attributes {
-                            match a {
-                                StatusAttribute::Messages(m) => f.total = m,
-                                StatusAttribute::Unseen(u) => f.unseen = u,
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-            }
-        }
         // Feste Reihenfolge: Systemordner zuerst, dann der Rest wie vom Server.
         let order = ["inbox", "drafts", "sent", "archive", "junk", "trash"];
         out.sort_by_key(|f| order.iter().position(|r| *r == f.role).unwrap_or(order.len()));
@@ -305,7 +315,7 @@ impl MailClient {
         if uids.is_empty() {
             return Ok(0);
         }
-        if !self.list_folders()?.iter().any(|f| f.id == target) {
+        if !self.folder_names()?.iter().any(|f| f.id == target) {
             self.session.create(target).map_err(err)?;
             let _ = self.session.subscribe(target);
         }
@@ -324,7 +334,7 @@ impl MailClient {
         if self.read_only {
             return Err(READ_ONLY_MSG.into());
         }
-        let trash = self.list_folders()?.into_iter().find(|f| f.role == "trash").map(|f| f.id);
+        let trash = self.folder_names()?.into_iter().find(|f| f.role == "trash").map(|f| f.id);
         match trash {
             Some(t) if t != folder => self.move_many(folder, uids, &t),
             _ => {
@@ -364,7 +374,7 @@ impl MailClient {
             return Err(READ_ONLY_MSG.into());
         }
         let trash = self
-            .list_folders()?
+            .folder_names()?
             .into_iter()
             .find(|f| f.role == "trash")
             .map(|f| f.id);
@@ -462,7 +472,7 @@ impl MailClient {
             return Err(READ_ONLY_MSG.into());
         }
         let name = clean_folder_name(name)?;
-        let folders = self.list_folders()?;
+        let folders = self.folder_names()?;
         let delim = folders.first().map(|f| f.delim.clone()).unwrap_or_else(|| ".".into());
         if name.contains(&delim) {
             return Err(format!("Das Zeichen „{delim}“ ist in Ordnernamen nicht erlaubt."));
@@ -482,7 +492,7 @@ impl MailClient {
             return Err(READ_ONLY_MSG.into());
         }
         let name = clean_folder_name(name)?;
-        let folders = self.list_folders()?;
+        let folders = self.folder_names()?;
         let f = folders.iter().find(|f| f.id == id).ok_or("Ordner nicht gefunden.")?;
         if !f.role.is_empty() {
             return Err("Systemordner wie Posteingang oder Papierkorb können nicht umbenannt werden.".into());
@@ -512,7 +522,7 @@ impl MailClient {
         if self.read_only {
             return Err(READ_ONLY_MSG.into());
         }
-        let folders = self.list_folders()?;
+        let folders = self.folder_names()?;
         let f = folders.iter().find(|f| f.id == id).ok_or("Ordner nicht gefunden.")?;
         if !f.role.is_empty() {
             return Err("Systemordner wie Posteingang oder Papierkorb können nicht gelöscht werden.".into());
@@ -549,7 +559,7 @@ impl MailClient {
         let folders: Vec<String> = match folder {
             Some(f) => vec![f.to_string()],
             None => self
-                .list_folders()?
+                .folder_names()?
                 .into_iter()
                 .filter(|f| f.role != "trash" && f.role != "junk")
                 .map(|f| f.id)

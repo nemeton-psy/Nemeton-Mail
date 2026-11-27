@@ -63,7 +63,7 @@
             <h3 id="ftitle">Posteingang</h3>
             <div class="counts"><span id="sum"></span>
               <button class="icon" id="btn-refresh" type="button" title="Neue Mails abrufen">↻ Abrufen</button>
-              <span class="filterbox"><button class="icon filterbtn" id="btn-filter" type="button" aria-haspopup="true" aria-expanded="false" title="Nach Kategorie filtern">Kategorien ▾</button><button class="icon filterx" id="btn-filter-clear" type="button" title="Filter aufheben" hidden>×</button></span></div>
+              <button class="icon filterbtn" id="btn-unread" type="button" aria-pressed="false" title="Nur ungelesene Mails in diesem Ordner zeigen (wird pro Ordner gemerkt)">Nur ungelesene</button><span class="filterbox"><button class="icon filterbtn" id="btn-filter" type="button" aria-haspopup="true" aria-expanded="false" title="Nach Kategorie filtern">Kategorien ▾</button><button class="icon filterx" id="btn-filter-clear" type="button" title="Filter aufheben" hidden>×</button></span></div>
             <div class="find">
               <input class="search" id="q" type="search" placeholder="Nachrichten durchsuchen">
               <div class="seg" role="group" aria-label="Suchbereich">
@@ -73,7 +73,7 @@
             </div>
           </div>
           <div class="cols" id="cols" aria-hidden="true">
-            <span id="col-who">Von</span><span>Ordner</span><span>Betreff</span><span class="c-date">Datum</span><span>Kategorie</span>
+            <span id="col-who">Von</span><span class="c-fold">Ordner</span><span>Betreff</span><span class="c-date">Datum</span><span>Kategorie</span>
           </div>
           <div class="mails" id="mails" tabindex="0" aria-label="Nachrichtenliste. Pfeiltasten wählen aus, Enter öffnet, Entf löscht, Rücktaste schließt."></div>
           <div class="split" id="split-read" title="Ziehen, um den Lesebereich breiter oder schmaler zu machen"></div>

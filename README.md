@@ -7,7 +7,7 @@ Ein eigenes, schlankes E-Mail-Programm für macOS und Windows.
 Alles, was du in der App tust (löschen, verschieben, gelesen markieren, Ordner ändern), passiert sofort auf dem Server – genau wie auf dem Handy.
 Die App gleicht sich jede Minute mit dem Server ab und sofort, wenn du ins Fenster zurückkommst. (Den früheren Testmodus gibt es seit Version 0.6 nicht mehr.)
 
-## Was es schon kann (Version 0.6)
+## Was es schon kann (Version 0.7)
 
 - Mit dem eigenen Postfach verbinden (für Posteo voreingestellt). Das Passwort liegt im Schlüsselbund des Computers.
 - Ordner mit Anzahl ungelesener Mails
@@ -37,6 +37,10 @@ Die App gleicht sich jede Minute mit dem Server ab und sofort, wenn du ins Fenst
 - **Mehrere Mails markieren:** Shift + Pfeiltaste, Shift + Klick (Bereich), Cmd/Strg + Klick (einzeln dazu), Cmd/Strg + A (alle). Markierte Mails gemeinsam löschen, verschieben (auch per Ziehen), als gelesen markieren oder einer Kategorie zuordnen
 - **Rechtsklick auf Ordner:** Alle als gelesen markieren, Neuer (Unter-)Ordner, Umbenennen, Ordner löschen (die Mails darin kommen vorher in den Papierkorb)
 - Suche zeigt beim Tippen sofort Treffer aus Absender und Betreff, die Suche im Mailtext auf dem Server folgt
+- **Nur ungelesene** (Knopf neben „Kategorien ▾“): zeigt nur ungelesene Mails, für jeden Ordner einzeln gemerkt. Was man gerade liest, bleibt sichtbar, bis man den Ordner wechselt
+- Die Ordner-Spalte erscheint nur bei der Suche in allen Ordnern
+- Fenstergröße, Position und Bildschirm werden gemerkt
+- Nach einem Klick in die geöffnete Mail funktionieren Entf, Pfeiltasten und Rücktaste sofort; markierter Text lässt sich mit Cmd/Strg + C kopieren, Bild-auf/ab blättert in der Mail
 - Weitere Absenderadressen (Posteo-Aliasse) im Feld „Von“; beim Antworten wird automatisch die Adresse gewählt, an die die Mail ging
 - Gesendete Mails landen im Ordner „Gesendet“, beantwortete werden als beantwortet markiert
 
